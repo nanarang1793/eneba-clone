@@ -1,0 +1,31 @@
+@import "tailwindcss";
+
+/*
+ * Eneba design tokens.
+ *
+ * Tailwind v4 turns every --color-* variable below into utility classes:
+ * --color-page  ->  bg-page, text-page, border-page, …
+ * Change a colour here and it changes everywhere.
+ *
+ * Base palette from Eneba's brand colours (deep purple #1F0A4D,
+ * lavender #A182E8, orange #FD5A20) plus the yellow used on their buttons.
+ */
+@theme {
+  --color-page: #1f0a4d; /* page background */
+  --color-header: #2d0f6e; /* top bar */
+  --color-surface: #2b1466; /* cards, sidebar, dropdowns */
+  --color-surface-hover: #3a1d85;
+  --color-line: #46288f; /* borders and dividers */
+  --color-muted: #b9a8e8; /* secondary text */
+  --color-accent: #a182e8; /* links, selected states */
+  --color-cta: #ffd02f; /* yellow call-to-action buttons */
+  --color-cta-hover: #ffdc5e;
+  --color-discount: #fd5a20; /* "-35%" badges */
+  --color-region: #2fbf71; /* region tag on covers */
+
+  --font-sans: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+
+body {
+  @apply bg-page font-sans text-white antialiased;
+}

@@ -1,0 +1,87 @@
+# Local development stack.
+#
+#   docker compose up -d db          # start Postgres
+#   docker compose run --rm migrate  # apply all migrations
+#   docker compose run --rm seed     # load seed data (wipes catalog/order tables first)
+#   docker compose up -d --build api # build + run the Go API in Docker on :8080
+#                                    # (alternative to `go run ./cmd/api`; no local Go needed)
+#   docker compose up -d web         # Vite dev server on :5173 (no local Node needed)
+#
+# Or just: make db-reset
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: eneba
+      POSTGRES_PASSWORD: eneba
+      POSTGRES_DB: eneba
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eneba -d eneba"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  # golang-migrate CLI image: no local install needed.
+  migrate:
+    image: migrate/migrate:v4.18.1
+    profiles: ["tools"]
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./backend/migrations:/migrations:ro
+    entrypoint: ["migrate", "-path", "/migrations", "-database", "postgres://eneba:eneba@db:5432/eneba?sslmode=disable"]
+    command: ["up"]
+
+  seed:
+    image: postgres:16-alpine
+    profiles: ["tools"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: eneba
+    volumes:
+      - ./backend/seed:/seed:ro
+    entrypoint: ["psql", "-h", "db", "-U", "eneba", "-d", "eneba", "-v", "ON_ERROR_STOP=1", "-q", "-f", "/seed/seed.sql"]
+
+  # The Go API, built from backend/Dockerfile (the same image used for deploys).
+  # Inside Docker the database host is "db", not "localhost".
+  api:
+    build: ./backend
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://eneba:eneba@db:5432/eneba?sslmode=disable
+      PORT: "8080"
+    ports:
+      - "8080:8080"
+
+  # The React frontend's Vite dev server. Your frontend/ folder is mounted
+  # into the container, so saving a file reloads the page as usual.
+  # node_modules lives in its own Docker volume: the packages inside are built
+  # for Linux and must not mix with a Windows node_modules folder.
+  web:
+    image: node:22-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    depends_on:
+      - api
+    environment:
+      VITE_API_PROXY_TARGET: http://api:8080   # inside Docker the API is "api", not localhost
+      VITE_USE_POLLING: "1"
+    volumes:
+      - ./frontend:/app
+      - web_node_modules:/app/node_modules
+    ports:
+      - "5173:5173"
+
+volumes:
+  pgdata:
+  web_node_modules:

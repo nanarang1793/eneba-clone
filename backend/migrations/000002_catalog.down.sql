@@ -1,0 +1,8 @@
+DROP TABLE IF EXISTS product_keys;
+DROP TYPE  IF EXISTS key_status;
+DROP TABLE IF EXISTS offers;
+DROP TABLE IF EXISTS sellers;
+DROP TABLE IF EXISTS products;
+DROP TYPE  IF EXISTS product_type;
+DROP TABLE IF EXISTS regions;
+DROP TABLE IF EXISTS platforms;
