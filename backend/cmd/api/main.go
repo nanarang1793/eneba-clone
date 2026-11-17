@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"eneba/backend/internal/auth"
 	"eneba/backend/internal/catalog"
 	"eneba/backend/internal/httpx"
 )
@@ -59,6 +60,7 @@ func newRouter(db *pgxpool.Pool) http.Handler {
 	r.MethodNotAllowed(httpx.MethodNotAllowed)
 
 	catalogHandler := catalog.NewHandler(catalog.NewStore(db))
+	authHandler := auth.NewHandler(auth.NewStore(db))
 
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -69,6 +71,7 @@ func newRouter(db *pgxpool.Pool) http.Handler {
 			httpx.JSON(w, http.StatusOK, map[string]string{"status": "ok"})
 		})
 		catalogHandler.Routes(r)
+		authHandler.Routes(r)
 	})
 	return r
 }

@@ -11,7 +11,9 @@ package httpx
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
+	"mime"
 	"net/http"
 	"runtime/debug"
 )
@@ -21,7 +23,8 @@ const (
 	CodeInvalidParameter = "invalid_parameter" // 400: a query/body value is wrong
 	CodeNotFound         = "not_found"         // 404: no such route or resource
 	CodeMethodNotAllowed = "method_not_allowed"
-	CodeInternal         = "internal" // 500: our fault; details only go to the log
+	CodeUnauthorized     = "unauthorized" // 401: not signed in (or session expired)
+	CodeInternal         = "internal"     // 500: our fault; details only go to the log
 )
 
 type errorBody struct {
@@ -84,4 +87,20 @@ func Recoverer(next http.Handler) http.Handler {
 		}()
 		next.ServeHTTP(w, r)
 	})
+}
+
+// DecodeJSON reads a JSON request body into v. It insists on the
+// application/json content type: a plain HTML form on another website can't
+// send that, which (together with SameSite cookies) blocks cross-site form
+// posts against our endpoints. Bodies are capped at 1 MB.
+func DecodeJSON(w http.ResponseWriter, r *http.Request, v any) error {
+	mediaType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if mediaType != "application/json" {
+		return errors.New("request body must be JSON (Content-Type: application/json)")
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
+		return errors.New("request body is not valid JSON")
+	}
+	return nil
 }

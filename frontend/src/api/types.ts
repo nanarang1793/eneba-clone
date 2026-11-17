@@ -65,3 +65,11 @@ export type Offer = {
   is_best: boolean; // cheapest in-stock offer
   seller: { slug: string; name: string; rating: number; sales_count: number };
 };
+
+/** A signed-in account (GET /api/auth/me). */
+export type User = {
+  id: string;
+  email: string;
+  display_name: string;
+  created_at: string;
+};

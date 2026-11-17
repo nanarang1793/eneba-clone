@@ -7,7 +7,7 @@ A digital-key marketplace in Eneba's style. React + TypeScript frontend, Go REST
 
 > The API runs on Render's free tier, which sleeps after ~15 minutes without traffic. The first request after a pause can take up to a minute while it wakes up; after that it's fast.
 
-> Status: **day 3.** Store page with filters, sorting, pagination and facet counts; product page with every seller's offer (cheapest in-stock first, best price highlighted) and links to other platforms/regions; header search with debounced suggestions, keyboard navigation and synonyms ("gta", "cod", "bg3"…).
+> Status: **day 4.** Store page (filters, sorting, pagination, facet counts); product page with every seller's offer; header search with suggestions and synonyms; accounts: register, sign in/out with a server-side session cookie, an account page only signed-in users can open. Demo account: `demo@eneba.test` / `demo1234`.
 
 ## Repo layout
 
@@ -15,7 +15,8 @@ A digital-key marketplace in Eneba's style. React + TypeScript frontend, Go REST
 backend/
   cmd/api/        HTTP server: config, DB pool, router, middleware
   cmd/seedgen/    deterministic seed generator → seed/seed.sql
-  internal/httpx/ JSON + shared error format + panic recoverer
+  internal/httpx/ JSON + shared error format + panic recoverer + JSON body decoding
+  internal/auth/  store.go (users + sessions SQL) · handler.go (register/login/logout/me, cookie) · middleware.go (RequireUser)
   internal/catalog/ params.go (validation) · store.go (list/facet/suggest SQL) · product.go (product + offers SQL)
                   synonyms.go (search short names) · handler.go (HTTP) · types.go (JSON)
   migrations/     golang-migrate SQL files (NNNNNN_name.up.sql / .down.sql)
@@ -27,6 +28,8 @@ frontend/src/
   features/store/ StorePage, FilterSidebar, SortSelect, ProductCard, Pagination, useStoreParams (URL state)
   features/product/ ProductPage, OffersTable
   features/search/  SearchBox (suggestions dropdown), useDebouncedValue
+  features/auth/    LoginPage, RegisterPage, RequireAuth (protected routes), useCurrentUser, useLogout
+  features/account/ AccountPage
   styles/         Tailwind + Eneba design tokens
 docs/AI_LOG.md    full AI conversation log (assignment deliverable)
 docker-compose.yml
@@ -90,6 +93,10 @@ Codes: `invalid_parameter` (400), `not_found` (404), `method_not_allowed` (405),
 | `GET /api/products/{slug}` | One product: details, cheapest in-stock price (`null` when sold out), `in_stock`, and `variants` (same game on other platforms/regions). 404 if the slug doesn't exist |
 | `GET /api/products/{slug}/offers` | `{ items }`: every active seller offer with seller rating/sales, `stock` (usable keys), `in_stock` and `is_best`. Sorted in-stock first, then price, then seller rating |
 | `GET /api/search/suggest?q=&limit=6` | `{ items }`: up to `limit` (1–10) best matches for the header dropdown, same search as the store. Fewer than 2 characters returns an empty list |
+| `POST /api/auth/register` | `{email, password, display_name?}` → 201 + user, and signs you in. 400 for an invalid email, a password outside 8–72 characters or a name over 40; 409 `email_taken` |
+| `POST /api/auth/login` | `{email, password}` → 200 + user and the session cookie. 401 `invalid_credentials` for both an unknown email and a wrong password |
+| `POST /api/auth/logout` | Deletes the session and the cookie → 204 |
+| `GET /api/auth/me` | `{"user": {...}}` when signed in, `{"user": null}` when not (always 200: being signed out isn't an error) |
 
 `GET /api/products` parameters (all optional):
 
@@ -142,4 +149,15 @@ Game titles are real so search feels realistic. Prices, sellers, keys and descri
 | Frontend | Vercel (Vite preset) | Root directory `frontend`; `frontend/vercel.json` rewrites `/api/*` to the Render API, so the browser only ever talks to one origin |
 
 Every push to `main` redeploys both Render and Vercel.
+
+## Accounts and security
+
+- **Passwords** are hashed with bcrypt (cost 10). They're never stored or logged in plain text.
+- **Sessions:** on sign-in the server creates a random 256-bit token and sends it in a cookie. The `sessions` table stores only its SHA-256 hash, so a database leak doesn't hand out working cookies. Sign-out deletes the row, so the cookie stops working immediately (unlike a JWT). Sessions last 30 days.
+- **The cookie** is `HttpOnly` (page JavaScript can't read it, so an XSS bug can't steal it), `SameSite=Lax` (not sent on POSTs from other sites) and `Secure` in production.
+- **Cross-site requests:** POST endpoints only accept `Content-Type: application/json`, which a plain HTML form on another site can't send.
+- **No account enumeration:** an unknown email and a wrong password give the same 401 message, and take the same time, because unknown emails are checked against a dummy bcrypt hash.
+- **Redirects after sign-in** (`/login?next=…`) only accept paths on this site, so the login page can't send people to `//evil.com`.
+- **Protected pages:** `RequireAuth` on the frontend only hides pages. The real protection is `RequireUser` on the backend, which answers 401 without a valid session.
+- **Not done (would be next):** rate limiting login attempts, email verification, password reset.
 

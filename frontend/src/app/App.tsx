@@ -1,5 +1,9 @@
 import { Link, Navigate, Route, Routes } from "react-router";
 import { Layout } from "../components/layout/Layout";
+import { AccountPage } from "../features/account/AccountPage";
+import { LoginPage } from "../features/auth/LoginPage";
+import { RegisterPage } from "../features/auth/RegisterPage";
+import { RequireAuth } from "../features/auth/RequireAuth";
 import { ProductPage } from "../features/product/ProductPage";
 import { StorePage } from "../features/store/StorePage";
 
@@ -11,6 +15,16 @@ export function App() {
         <Route index element={<Navigate to="/store" replace />} />
         <Route path="store" element={<StorePage />} />
         <Route path="product/:slug" element={<ProductPage />} />
+        <Route path="login" element={<LoginPage />} />
+        <Route path="register" element={<RegisterPage />} />
+        <Route
+          path="account"
+          element={
+            <RequireAuth>
+              <AccountPage />
+            </RequireAuth>
+          }
+        />
         <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>

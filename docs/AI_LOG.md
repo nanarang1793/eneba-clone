@@ -392,3 +392,66 @@ It also tested whether day 2 could be built in its workspace. It can't: package 
 **Known trade-off:** typo search for "eldn" also suggests two Skyrim products ("**Elde**r Scrolls" is a close trigram match). Elden Ring ranks first, which is acceptable for typo-tolerant search.
 
 **Next (day 4):** accounts. Register, log in and log out with bcrypt-hashed passwords and an httpOnly session cookie stored hashed in `sessions`, plus `GET /auth/me` and protected routes.
+
+## Session 5 — 2026-11-16 (Day 4)
+
+### Prompt 1
+
+> do day 4 now
+
+### Response 1
+
+*(Work done: built and tested in the assistant's workspace against Postgres 16 with the project's migrations and seed, then wrote the files into `Downloads\eneba-clone`.)*
+
+**Backend**
+- `internal/auth/store.go`: SQL for users and sessions.
+  - `CreateUser` turns a unique-violation error (`23505`) into `ErrEmailTaken`. `email` is `citext`, so letter case doesn't matter.
+  - `CreateSession` makes a random 32-byte token, stores only its SHA-256 hash and an expiry 30 days out, and cleans up the user's expired sessions.
+  - `UserBySession` looks the hash up and checks `expires_at > now()`. `DeleteSession` handles logout.
+- `internal/auth/handler.go`:
+  - `POST /auth/register` validates the email, an 8–72 character password (bcrypt's limit is 72 bytes) and a name of at most 40 characters. The name defaults to the part of the email before the @. It hashes the password with bcrypt cost 10, creates the user and signs them in (201).
+  - `POST /auth/login` gives the same 401 "Wrong email or password" for an unknown email and a wrong password. Unknown emails are compared against a dummy bcrypt hash so the response time doesn't reveal which emails exist.
+  - `POST /auth/logout` deletes the row and expires the cookie (204).
+  - `GET /auth/me` answers `{user}` or `{user: null}`.
+  - The cookie is `HttpOnly`, `SameSite=Lax`, and `Secure` behind HTTPS (`X-Forwarded-Proto`).
+- `internal/auth/middleware.go`: `RequireUser` answers 401 without a valid session, otherwise puts the user in the request context (`CurrentUser(r)`). Day 5's orders endpoints will sit behind it. A dead cookie is also deleted from the browser.
+- `internal/httpx`: `DecodeJSON` requires `Content-Type: application/json` (a cross-site HTML form can't send it) and caps bodies at 1 MB. Also added the `unauthorized` error code.
+- `go.mod`: `golang.org/x/crypto` (bcrypt) went from indirect to direct, at the same version and checksums as before.
+
+**Frontend**
+- `api/client.ts` gained `apiPost` (JSON body, handles 204), and `api/auth.ts` has the auth calls.
+- `features/auth/`:
+  - `useCurrentUser` keeps one TanStack Query entry, `["me"]`, that login and register write to directly, so the header updates without another request.
+  - `safeNext` only allows same-site paths after sign-in.
+  - `LoginPage` and `RegisterPage` use `useMutation` for the pending state and the server's error message, and show the demo account hint. Opening them while signed in redirects you on.
+  - `RequireAuth` sends signed-out visitors to `/login?next=<page>`. `useLogout` handles sign-out.
+- `features/account/AccountPage.tsx` shows the name, email, "member since", an orders placeholder for day 5, and sign out.
+- Header: "Sign in" (which brings you back to the current page), or an avatar initial and the name, linking to `/account`.
+
+**Testing done**
+- curl:
+  - Signed out, `/me` returns `{user:null}`. A wrong password and an unknown email return the identical 401, at ~60 vs ~68 ms median (no timing leak).
+  - A form-encoded POST is rejected with 400, and a mixed-case email (" Demo@Eneba.TEST ") signs in.
+  - The `Set-Cookie` header has `HttpOnly; SameSite=Lax`. The database has the token's SHA-256 hash and never the token itself.
+  - Logout deletes the row and the old cookie gets 401. An expired session gets 401 plus a cookie-deleting `Set-Cookie`.
+  - Register: bad email, `a@b`, a short password, a long name and broken JSON each return 400; success returns 201 and signs you in; the same email in other letter case returns 409. The stored hash is `$2a$10$…`.
+  - GET on `/login` returns 405.
+- A throwaway Go test checked `RequireUser`: no cookie and a bad cookie get 401, a valid session gets 200 with the user. The test isn't committed.
+- Browser (15 checks):
+  - The header shows "Sign in", `/account` redirects to `/login?next=%2Faccount`, and a wrong password shows the error.
+  - Login lands back on `/account` with "Demo User" in the header. `document.cookie` can't see the session cookie (HttpOnly), and a reload keeps you signed in.
+  - `/login` while signed in skips ahead. Sign out goes to `/store`, removes the cookie and protects `/account` again.
+  - Signing in from a product page returns you to that page.
+  - `next=//evil.example`, `/\evil.example` and `https://evil.example` all land on `/account` instead.
+  - Register: the browser blocks a short password, and success lands on `/account` with the chosen name. The same email in capitals shows "An account with this email already exists", and the new account can sign in again.
+- Regressions: the Day 2 (13) and Day 3 (16) suites still pass. `tsc`, `vite build` and `go vet` are clean.
+
+**Bugs found and fixed while testing**
+- **Signing out went to the login page instead of the store.** Clearing the user and navigating raced: the account page's `RequireAuth` saw "no user" first and redirected to `/login?next=/account`. Sign-out now does a full page load of `/store`, which also throws away all cached private data.
+- **A red 401 in the browser console on every page** for signed-out visitors, from the `/me` check. Being signed out isn't an error, so `/me` now always answers 200 with `{user: null}`. 401 is kept for endpoints that really need a sign-in.
+- The `safeNext` redirect check initially missed `/\evil.com`, which browsers treat as `//evil.com`.
+- The 401 message for an unknown cookie said "expired", which isn't always true; it now says "Your session has ended".
+
+**Not done (noted in the README):** rate limiting login attempts, email verification, password reset.
+
+**Next (day 5):** a cart in the browser, a price quote from the server, and orders that reserve real keys inside a transaction (`FOR UPDATE SKIP LOCKED`). Then a simulated payment and order history that shows the keys.
