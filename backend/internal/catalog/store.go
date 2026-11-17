@@ -17,12 +17,14 @@ type Store struct {
 
 func NewStore(db *pgxpool.Pool) *Store { return &Store{db: db} }
 
+// usableKey is the SQL condition for a key that can still be sold: it's
+// available, or it was reserved but the reservation has expired (see the data
+// model notes in the README). Stock everywhere is a count of these.
+const usableKey = `(k.status = 'available' OR (k.status = 'reserved' AND k.reserved_until < now()))`
+
 // listingCTE is the "what can you buy right now" view of the catalog:
 // one row per product that has at least one active offer with a usable key,
-// with the cheapest such price. Every list/facet query starts from it.
-//
-// A key is usable when it's available, or reserved but the reservation has
-// expired (see the data model notes in the README).
+// with the cheapest such price. Every list/facet/suggest query starts from it.
 const listingCTE = `
 WITH listing AS (
     SELECT p.id, p.slug, p.name, p.title, p.type::text AS type, p.image_url,
@@ -37,8 +39,7 @@ WITH listing AS (
     JOIN offers    o  ON o.product_id = p.id AND o.is_active
     WHERE EXISTS (
         SELECT 1 FROM product_keys k
-        WHERE k.offer_id = o.id
-          AND (k.status = 'available' OR (k.status = 'reserved' AND k.reserved_until < now()))
+        WHERE k.offer_id = o.id AND ` + usableKey + `
     )
     GROUP BY p.id, pl.id, r.id
 )`
@@ -75,8 +76,8 @@ func (w *where) sql() string {
 func buildWhere(p ListParams, skip string) (w *where, qArg string) {
 	w = &where{}
 	if p.Q != "" {
-		q := strings.ToLower(p.Q)
-		// Substring match catches short queries ("gta", "fifa") that trigrams miss;
+		q := expandQuery(p.Q) // "gta" -> "grand theft auto"
+		// Substring match catches short queries ("fifa") that trigrams miss;
 		// word_similarity (<%) catches typos ("eldn ring", "witchr").
 		// \, % and _ are escaped so they're matched literally by LIKE.
 		like := "%" + strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(q) + "%"
@@ -130,31 +131,9 @@ func (s *Store) ListProducts(ctx context.Context, p ListParams) (ListResult, err
 	res.TotalPages = (res.Total + p.PerPage - 1) / p.PerPage
 
 	// 2. The current page of items.
-	limit, offset := w.arg(p.PerPage), w.arg((p.Page-1)*p.PerPage)
-	rows, err := s.db.Query(ctx, listingCTE+`
-        SELECT l.id, l.slug, l.name, l.title, l.type, l.image_url,
-               l.platform_slug, l.platform_name, l.region_slug, l.region_name,
-               l.price_cents, l.msrp_cents, l.offer_count
-        FROM listing l
-        WHERE `+w.sql()+`
-        ORDER BY `+orderBy(p.Sort, qArg)+`
-        LIMIT `+limit+` OFFSET `+offset, w.args...)
+	res.Items, err = s.queryProducts(ctx, w, orderBy(p.Sort, qArg), p.PerPage, (p.Page-1)*p.PerPage)
 	if err != nil {
-		return res, fmt.Errorf("list products: %w", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var it Product
-		if err := rows.Scan(&it.ID, &it.Slug, &it.Name, &it.Title, &it.Type, &it.ImageURL,
-			&it.Platform.Slug, &it.Platform.Name, &it.Region.Slug, &it.Region.Name,
-			&it.PriceCents, &it.MSRPCents, &it.OfferCount); err != nil {
-			return res, fmt.Errorf("scan product: %w", err)
-		}
-		it.DiscountPercent = discountPercent(it.PriceCents, it.MSRPCents)
-		res.Items = append(res.Items, it)
-	}
-	if err := rows.Err(); err != nil {
-		return res, fmt.Errorf("list products: %w", err)
+		return res, err
 	}
 
 	// 3. Facet counts for the sidebar.
@@ -165,6 +144,43 @@ func (s *Store) ListProducts(ctx context.Context, p ListParams) (ListResult, err
 		return res, err
 	}
 	return res, nil
+}
+
+// queryProducts returns product cards from the listing, filtered by w,
+// in the given order. Used by the store page and by search suggestions.
+func (s *Store) queryProducts(ctx context.Context, w *where, order string, limit, offset int) ([]Product, error) {
+	limitArg, offsetArg := w.arg(limit), w.arg(offset)
+	rows, err := s.db.Query(ctx, listingCTE+`
+        SELECT l.id, l.slug, l.name, l.title, l.type, l.image_url,
+               l.platform_slug, l.platform_name, l.region_slug, l.region_name,
+               l.price_cents, l.msrp_cents, l.offer_count
+        FROM listing l
+        WHERE `+w.sql()+`
+        ORDER BY `+order+`
+        LIMIT `+limitArg+` OFFSET `+offsetArg, w.args...)
+	if err != nil {
+		return nil, fmt.Errorf("list products: %w", err)
+	}
+	defer rows.Close()
+	items := []Product{}
+	for rows.Next() {
+		var it Product
+		if err := rows.Scan(&it.ID, &it.Slug, &it.Name, &it.Title, &it.Type, &it.ImageURL,
+			&it.Platform.Slug, &it.Platform.Name, &it.Region.Slug, &it.Region.Name,
+			&it.PriceCents, &it.MSRPCents, &it.OfferCount); err != nil {
+			return nil, fmt.Errorf("scan product: %w", err)
+		}
+		it.DiscountPercent = discountPercent(it.PriceCents, it.MSRPCents)
+		items = append(items, it)
+	}
+	return items, rows.Err()
+}
+
+// Suggest returns up to `limit` best matches for the header search dropdown:
+// the same search as the store page, without filters, counts or facets.
+func (s *Store) Suggest(ctx context.Context, q string, limit int) ([]Product, error) {
+	w, qArg := buildWhere(ListParams{Q: q}, "")
+	return s.queryProducts(ctx, w, orderBy(SortRelevance, qArg), limit, 0)
 }
 
 // facet counts matching products per platform (or region). It starts from the

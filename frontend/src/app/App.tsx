@@ -1,5 +1,6 @@
 import { Link, Navigate, Route, Routes } from "react-router";
 import { Layout } from "../components/layout/Layout";
+import { ProductPage } from "../features/product/ProductPage";
 import { StorePage } from "../features/store/StorePage";
 
 export function App() {
@@ -9,6 +10,7 @@ export function App() {
         {/* The data-driven homepage comes on day 6; until then / opens the store. */}
         <Route index element={<Navigate to="/store" replace />} />
         <Route path="store" element={<StorePage />} />
+        <Route path="product/:slug" element={<ProductPage />} />
         <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>

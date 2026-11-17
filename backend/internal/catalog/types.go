@@ -53,3 +53,49 @@ type Filters struct {
 	} `json:"price"`
 	Sorts []string `json:"sorts"`
 }
+
+// ProductDetail is the body of GET /api/products/{slug}.
+type ProductDetail struct {
+	ID              int64     `json:"id"`
+	Slug            string    `json:"slug"`
+	Name            string    `json:"name"`
+	Title           string    `json:"title"`
+	Type            string    `json:"type"`
+	Description     string    `json:"description"`
+	ImageURL        *string   `json:"image_url"`
+	Publisher       *string   `json:"publisher"`
+	ReleaseDate     *string   `json:"release_date"` // "2022-02-25"
+	Platform        Named     `json:"platform"`
+	Region          Named     `json:"region"`
+	MSRPCents       *int      `json:"msrp_cents"`
+	PriceCents      *int      `json:"price_cents"` // cheapest in-stock offer; null when sold out
+	DiscountPercent int       `json:"discount_percent"`
+	OfferCount      int       `json:"offer_count"` // sellers with stock
+	InStock         bool      `json:"in_stock"`
+	Variants        []Variant `json:"variants"` // same title on other platforms/regions
+}
+
+// Variant is a link to the same game on another platform or region.
+type Variant struct {
+	Slug       string `json:"slug"`
+	Platform   string `json:"platform"`
+	Region     string `json:"region"`
+	PriceCents int    `json:"price_cents"`
+}
+
+// Offer is one row of the sellers table: GET /api/products/{slug}/offers.
+type Offer struct {
+	ID         int64  `json:"id"`
+	PriceCents int    `json:"price_cents"`
+	Stock      int    `json:"stock"` // usable keys
+	InStock    bool   `json:"in_stock"`
+	IsBest     bool   `json:"is_best"` // cheapest in-stock offer
+	Seller     Seller `json:"seller"`
+}
+
+type Seller struct {
+	Slug       string  `json:"slug"`
+	Name       string  `json:"name"`
+	Rating     float64 `json:"rating"` // 0–5
+	SalesCount int     `json:"sales_count"`
+}

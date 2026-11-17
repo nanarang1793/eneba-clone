@@ -332,3 +332,63 @@ It also tested whether day 2 could be built in its workspace. It can't: package 
 - **Render:** web service from the GitHub repo, Docker runtime, root directory `backend`, free instance in Frankfurt, `DATABASE_URL` as a secret environment variable, health check `/api/healthz`. The first deploy took 1 min 11 s; logs showed `api listening on :10000` and health checks answering 200. Opening the bare domain shows "Not Found", which is expected because every route lives under `/api`. Live at https://eneba-clone-d0ia.onrender.com/api/products.
 - **Vercel:** the import first picked `backend` as the root directory with the Go preset; changed to `frontend` (Vite preset). The assistant put the Render URL into `frontend/vercel.json` so `/api/*` is rewritten to the API. Deployed in 11 s; the preview showed the store with 198 results and live facet counts, confirming the full chain Vercel → Render → Neon. Live at https://eneba-clone-nine.vercel.app/store.
 - That completes the Day 1 leftovers (code on GitHub, app deployed). From now on every push redeploys both hosts.
+
+## Session 4 — 2026-11-16 (Day 3)
+
+### Prompt 1
+
+> start day 3
+
+### Response 1
+
+*(Work done: built and tested in the assistant's workspace against Postgres 16 with the project's migrations and seed, then wrote the files into `Downloads\eneba-clone`.)*
+
+**Backend** (`backend/internal/catalog/`)
+- `product.go` (new):
+  - `ProductBySlug` loads the product with a `LEFT JOIN LATERAL` that finds the cheapest in-stock price and the number of sellers with stock. Sold-out products still load (`price_cents: null`, `in_stock: false`), so old links don't break.
+  - It also lists the same title on other platforms/regions (`variants`).
+  - `OffersBySlug` lists every active offer with the seller's rating and sales, and stock counted from usable keys. Order: in stock first, then price, then seller rating. Sold-out offers stay in the list.
+  - The first row is flagged `is_best` only if it's in stock. Example: Assassin's Creed Shadows (PS5) has a cheaper BaltiKeys offer that's sold out, and the best price correctly goes to LootLane.
+- `synonyms.go` (new): a small map from the short names people type to words that appear in product names (`gta` → "grand theft auto", `cod`, `bg3`, `rdr2`, `fifa` → "ea sports fc", `ac`, `xgp`, `ps`…). Trigram search fixes typos, but it can't know that "gta" means Grand Theft Auto.
+- `store.go`:
+  - The "usable key" rule (available, or reserved with an expired reservation) is now one named constant, used by every query.
+  - The product-card query moved into `queryProducts()`, which both the store page and the new `Suggest()` use.
+  - Search text is run through `expandQuery()` first.
+- `handler.go`: `GET /api/products/{slug}`, `GET /api/products/{slug}/offers` (both 404 in the shared error format for unknown slugs), and `GET /api/search/suggest?q=&limit=` (limit 1–10; under 2 characters returns an empty list without querying).
+
+**Frontend** (`frontend/src/`)
+- `features/product/ProductPage.tsx`:
+  - The page has a breadcrumb, the cover, name, tags ("Works in: Europe"), publisher and release date, and links to other platforms/regions with prices.
+  - A price box shows the retail price struck through, the discount, "From €x" and a "Compare offers" button that jumps to the offers.
+  - An "About" section shows the description.
+  - Product and offers are two parallel queries, so each can load or fail on its own. It has loading skeletons, a "Product not found" page, an out-of-stock state, and sets the browser tab title.
+- `features/product/OffersTable.tsx`: one row per seller with rating, compact sales count ("313K sales"), stock, price and an "Add to cart" button. The button is disabled until the cart exists on day 5. The best row gets a yellow border and a "Best price" badge; sold-out rows are dimmed.
+- `features/search/SearchBox.tsx` + `useDebouncedValue.ts`: the header search now shows suggestions.
+  - Requests wait 250 ms after typing stops, so "eldn" typed letter by letter sent exactly one request.
+  - The old list stays visible while the next one loads.
+  - ↑/↓ highlight a row, Enter opens it (or runs a full search if nothing is highlighted), and the last row is "See all results for…".
+  - It follows the ARIA combobox pattern. The list stays open while you click it by preventing the default on `mousedown`, which fires before the input's `blur`.
+- `components/ui/Cover.tsx`: the placeholder cover moved here so cards, the product page and the dropdown share it. Product cards are now links to `/product/:slug`.
+- `main.tsx`: TanStack Query now retries only network/server errors, never 4xx, since a 404 won't change on a retry.
+
+**Testing done**
+- API with curl:
+  - The Elden Ring (PC) offers match the database (BaltiKeys €31.69 best, then €37.69, €39.99, €47.99).
+  - A sold-out offer sorts last, a fully sold-out product returns `in_stock: false` with no offers, and unknown slugs return 404.
+  - `limit=50` returns 400.
+  - Suggestions for `el`, `eldn`, `gta`, `gta 5`, `gta v`, `cod`, `bg3`, `rdr2`, `fifa`, `ac valhalla`, `ps plus`, `xgp`, `witcher` and `baldurs gate` all return the right games. `e` (one letter) returns nothing.
+- Browser (Playwright + headless Chrome):
+  - All 13 Day 2 store checks still pass.
+  - 16 new checks pass: card → product page (title, tab title), offers sorted with one "Best price" badge, price box, variant link, breadcrumb back to the store, a dimmed sold-out row, the out-of-stock page, an unknown product, and one debounced request while typing. Also ↓↓+Enter opening the highlighted product, `gta` suggestions, Escape closing the list, a mouse click on a suggestion, "See all results", the "No matches" row, and a 1-character query hiding the list.
+  - No console errors other than the intentional 404 test.
+  - `tsc` and `vite build` pass; `go vet` is clean.
+
+**Bugs found and fixed while testing**
+- Pressing Escape to close the suggestions also **cleared the search text**, because browsers clear `type="search"` inputs on Escape. The first Escape now only closes the list; a second one clears the text as usual.
+- An unknown product made 4 failed requests instead of 2, because TanStack Query retried the 404s. It now skips retries for 4xx.
+- `new Date("2022-12-03")` is UTC midnight, so the release date showed one day early in US time zones. It's now formatted in UTC.
+- Postgres can't use an output alias inside an `ORDER BY` expression (`ORDER BY (stock > 0)`), so offer stock is computed in a `LATERAL` join instead.
+
+**Known trade-off:** typo search for "eldn" also suggests two Skyrim products ("**Elde**r Scrolls" is a close trigram match). Elden Ring ranks first, which is acceptable for typo-tolerant search.
+
+**Next (day 4):** accounts. Register, log in and log out with bcrypt-hashed passwords and an httpOnly session cookie stored hashed in `sessions`, plus `GET /auth/me` and protected routes.

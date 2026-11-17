@@ -7,7 +7,7 @@ A digital-key marketplace in Eneba's style. React + TypeScript frontend, Go REST
 
 > The API runs on Render's free tier, which sleeps after ~15 minutes without traffic. The first request after a pause can take up to a minute while it wakes up; after that it's fast.
 
-> Status: **day 2.** Catalog API (`/api/products` with filters, sorting, pagination and facet counts; `/api/filters`) and the Store page (search, filter sidebar, sort, product grid, pagination, filters kept in the URL).
+> Status: **day 3.** Store page with filters, sorting, pagination and facet counts; product page with every seller's offer (cheapest in-stock first, best price highlighted) and links to other platforms/regions; header search with debounced suggestions, keyboard navigation and synonyms ("gta", "cod", "bg3"…).
 
 ## Repo layout
 
@@ -16,14 +16,17 @@ backend/
   cmd/api/        HTTP server: config, DB pool, router, middleware
   cmd/seedgen/    deterministic seed generator → seed/seed.sql
   internal/httpx/ JSON + shared error format + panic recoverer
-  internal/catalog/ params.go (validation) · store.go (SQL) · handler.go (HTTP) · types.go (JSON)
+  internal/catalog/ params.go (validation) · store.go (list/facet/suggest SQL) · product.go (product + offers SQL)
+                  synonyms.go (search short names) · handler.go (HTTP) · types.go (JSON)
   migrations/     golang-migrate SQL files (NNNNNN_name.up.sql / .down.sql)
   seed/seed.sql   generated seed data (committed, loaded with psql)
 frontend/src/
   api/            fetch client (ApiError) + typed endpoint functions
   app/            routes
-  components/     layout (Header, Layout) and ui (Price)
+  components/     layout (Header, Layout) and ui (Price, Cover)
   features/store/ StorePage, FilterSidebar, SortSelect, ProductCard, Pagination, useStoreParams (URL state)
+  features/product/ ProductPage, OffersTable
+  features/search/  SearchBox (suggestions dropdown), useDebouncedValue
   styles/         Tailwind + Eneba design tokens
 docs/AI_LOG.md    full AI conversation log (assignment deliverable)
 docker-compose.yml
@@ -84,12 +87,15 @@ Codes: `invalid_parameter` (400), `not_found` (404), `method_not_allowed` (405),
 | `GET /api/healthz` | `{"status":"ok"}` when the database is reachable |
 | `GET /api/products` | Store listing (below) |
 | `GET /api/filters` | All platforms, regions, the cheapest/most expensive listed price, and the sort options |
+| `GET /api/products/{slug}` | One product: details, cheapest in-stock price (`null` when sold out), `in_stock`, and `variants` (same game on other platforms/regions). 404 if the slug doesn't exist |
+| `GET /api/products/{slug}/offers` | `{ items }`: every active seller offer with seller rating/sales, `stock` (usable keys), `in_stock` and `is_best`. Sorted in-stock first, then price, then seller rating |
+| `GET /api/search/suggest?q=&limit=6` | `{ items }`: up to `limit` (1–10) best matches for the header dropdown, same search as the store. Fewer than 2 characters returns an empty list |
 
 `GET /api/products` parameters (all optional):
 
 | Param | Example | Notes |
 |---|---|---|
-| `q` | `eldn ring` | Typo-tolerant search: substring match **or** trigram word similarity (`pg_trgm`). Max 100 chars |
+| `q` | `eldn ring`, `gta` | Typo-tolerant search: substring match **or** trigram word similarity (`pg_trgm`), after expanding common short names (`gta`, `cod`, `bg3`, `rdr2`, `fifa`… see `backend/internal/catalog/synonyms.go`). Max 100 chars |
 | `platform` | `steam` or `steam,xbox` or repeated | Any of the listed platforms |
 | `region` | `global` | Same rules as `platform` |
 | `min_price`, `max_price` | `10`, `29.99` | Euros; compared with the cheapest in-stock offer |
