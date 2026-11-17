@@ -14,7 +14,9 @@ export function Header() {
 
   return (
     <header className="sticky top-0 z-20 border-b border-line bg-header/95 backdrop-blur">
-      <div className="mx-auto flex h-16 max-w-7xl items-center gap-4 px-4">
+      {/* Phones: logo + icons on one row, search full-width below.
+          md and up: one row with the search in the middle. */}
+      <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-4 gap-y-3 px-4 py-3 md:h-16 md:flex-nowrap md:py-0">
         <Link to="/" className="flex shrink-0 items-baseline gap-1.5 text-2xl font-extrabold tracking-tight">
           eneba
           <span className="rounded bg-accent/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-accent">
@@ -22,9 +24,11 @@ export function Header() {
           </span>
         </Link>
 
-        <SearchBox />
+        <div className="order-last w-full md:order-none md:flex-1">
+          <SearchBox />
+        </div>
 
-        <nav className="flex shrink-0 items-center gap-5 text-sm text-muted">
+        <nav className="ml-auto flex shrink-0 items-center gap-5 text-sm text-muted md:ml-0">
           <Link to="/store" className="hidden hover:text-white md:block">
             Store
           </Link>

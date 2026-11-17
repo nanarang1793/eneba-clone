@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { getFilters, getProducts } from "../../api/catalog";
+import { usePageTitle } from "../../components/usePageTitle";
 import { FilterSidebar } from "./FilterSidebar";
 import { Pagination } from "./Pagination";
 import { ProductCard } from "./ProductCard";
@@ -16,6 +17,7 @@ import { PER_PAGE, useStoreParams } from "./useStoreParams";
 export function StorePage() {
   const store = useStoreParams();
   const { filters } = store;
+  usePageTitle(filters.q ? `Results for “${filters.q}”` : "Store");
 
   const products = useQuery({
     queryKey: ["products", store.apiParams.toString()],
@@ -33,7 +35,7 @@ export function StorePage() {
   // On phones the sidebar is hidden behind a "Filters" button; on desktop (lg) it's always shown.
   const [showFilters, setShowFilters] = useState(false);
   const activeFilterCount =
-    filters.platforms.length + filters.regions.length + (filters.minPrice || filters.maxPrice ? 1 : 0);
+    filters.platforms.length + filters.types.length + filters.regions.length + (filters.minPrice || filters.maxPrice ? 1 : 0);
 
   function goToPage(page: number) {
     store.setPage(page);

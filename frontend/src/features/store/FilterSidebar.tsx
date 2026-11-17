@@ -5,8 +5,8 @@ import type { ListKey } from "./useStoreParams";
 
 type Props = {
   meta: Filters | undefined; // from GET /api/filters (all options + price bounds)
-  facets: { platforms: FacetCount[]; regions: FacetCount[] } | undefined; // counts for the current search
-  selected: { platforms: string[]; regions: string[]; minPrice: string; maxPrice: string };
+  facets: { platforms: FacetCount[]; regions: FacetCount[]; types: FacetCount[] } | undefined; // counts for the current search
+  selected: { platforms: string[]; regions: string[]; types: string[]; minPrice: string; maxPrice: string };
   onToggle: (key: ListKey, slug: string) => void;
   onPrice: (min: string, max: string) => void;
   onClear: () => void;
@@ -14,7 +14,11 @@ type Props = {
 
 export function FilterSidebar({ meta, facets, selected, onToggle, onPrice, onClear }: Props) {
   const hasFilters =
-    selected.platforms.length > 0 || selected.regions.length > 0 || selected.minPrice !== "" || selected.maxPrice !== "";
+    selected.platforms.length > 0 ||
+    selected.regions.length > 0 ||
+    selected.types.length > 0 ||
+    selected.minPrice !== "" ||
+    selected.maxPrice !== "";
 
   return (
     <aside className="space-y-4">
@@ -34,6 +38,12 @@ export function FilterSidebar({ meta, facets, selected, onToggle, onPrice, onCle
         onApply={onPrice}
       />
 
+      <CheckboxGroup
+        title="Type"
+        options={facets?.types ?? meta?.types.map((t) => ({ ...t, count: -1 })) ?? []}
+        selected={selected.types}
+        onToggle={(slug) => onToggle("type", slug)}
+      />
       <CheckboxGroup
         title="Platform"
         options={facets?.platforms ?? meta?.platforms.map((p) => ({ ...p, count: -1 })) ?? []}

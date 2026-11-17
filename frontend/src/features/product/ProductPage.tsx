@@ -1,9 +1,9 @@
-import { useEffect } from "react";
 import { Link, useParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { ApiError } from "../../api/client";
 import { getOffers, getProduct } from "../../api/catalog";
 import { Cover } from "../../components/ui/Cover";
+import { usePageTitle } from "../../components/usePageTitle";
 import { formatPrice } from "../../components/ui/Price";
 import { OffersTable } from "./OffersTable";
 
@@ -22,12 +22,7 @@ export function ProductPage() {
   const p = product.data;
 
   // Browser tab title, e.g. "Elden Ring (PC) Steam Key GLOBAL | Eneba clone".
-  useEffect(() => {
-    if (p) document.title = `${p.name} | Eneba clone`;
-    return () => {
-      document.title = "Eneba clone";
-    };
-  }, [p]);
+  usePageTitle(p?.name ?? "Product");
 
   if (product.isError) {
     const notFound = product.error instanceof ApiError && product.error.status === 404;

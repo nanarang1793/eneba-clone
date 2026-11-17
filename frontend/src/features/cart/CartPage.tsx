@@ -7,6 +7,7 @@ import { Cover } from "../../components/ui/Cover";
 import { formatPrice } from "../../components/ui/Price";
 import { useCurrentUser } from "../auth/useCurrentUser";
 import { MAX_QTY, useCart, type CartLine } from "./cartStore";
+import { usePageTitle } from "../../components/usePageTitle";
 
 /**
  * /cart: the lines come from the browser, but every price, stock level and
@@ -15,6 +16,7 @@ import { MAX_QTY, useCart, type CartLine } from "./cartStore";
  */
 export function CartPage() {
   const lines = useCart((s) => s.lines);
+  usePageTitle("Cart");
   const { user } = useCurrentUser();
   const navigate = useNavigate();
 

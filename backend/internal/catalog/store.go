@@ -90,6 +90,9 @@ func buildWhere(p ListParams, skip string) (w *where, qArg string) {
 	if len(p.Regions) > 0 && skip != "region" {
 		w.add("l.region_slug = ANY(" + w.arg(p.Regions) + ")")
 	}
+	if len(p.Types) > 0 && skip != "type" {
+		w.add("l.type = ANY(" + w.arg(p.Types) + ")")
+	}
 	if p.MinCents != nil {
 		w.add("l.price_cents >= " + w.arg(*p.MinCents))
 	}
@@ -141,6 +144,9 @@ func (s *Store) ListProducts(ctx context.Context, p ListParams) (ListResult, err
 		return res, err
 	}
 	if res.Facets.Regions, err = s.facet(ctx, p, "region", "regions", "region_slug"); err != nil {
+		return res, err
+	}
+	if res.Facets.Types, err = s.typeFacet(ctx, p); err != nil {
 		return res, err
 	}
 	return res, nil
@@ -210,6 +216,46 @@ func (s *Store) facet(ctx context.Context, p ListParams, skip, table, column str
 	return out, rows.Err()
 }
 
+// typeNames are the labels for the product_type enum values.
+var typeNames = map[string]string{"game": "Games", "dlc": "DLC", "gift_card": "Gift cards", "subscription": "Subscriptions"}
+
+// typeFacet counts matches per product type. Types aren't a table but an
+// enum, so the list of options comes from enum_range() instead of FROM a table.
+func (s *Store) typeFacet(ctx context.Context, p ListParams) ([]FacetCount, error) {
+	w, _ := buildWhere(p, "type")
+	rows, err := s.db.Query(ctx, listingCTE+`
+        SELECT t.v::text, count(l.id)
+        FROM unnest(enum_range(NULL::product_type)) AS t(v)
+        LEFT JOIN listing l ON l.type = t.v::text AND `+w.sql()+`
+        GROUP BY t.v
+        ORDER BY t.v`, w.args...)
+	if err != nil {
+		return nil, fmt.Errorf("type facet: %w", err)
+	}
+	defer rows.Close()
+	out := []FacetCount{}
+	for rows.Next() {
+		var f FacetCount
+		if err := rows.Scan(&f.Slug, &f.Count); err != nil {
+			return nil, fmt.Errorf("type facet: %w", err)
+		}
+		f.Name = typeNames[f.Slug]
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
+// Cards returns product cards for other packages (the homepage blocks).
+// cond and order are fixed SQL written in our own code, using the listing's
+// "l." columns; values go in args as $1, $2… so nothing a user typed is ever
+// pasted into SQL.
+//
+//	store.Cards(ctx, "l.type = $1", "l.sales_count DESC", 12, "gift_card")
+func (s *Store) Cards(ctx context.Context, cond, order string, limit int, args ...any) ([]Product, error) {
+	w := &where{conds: []string{cond}, args: args}
+	return s.queryProducts(ctx, w, order+", l.id", limit, 0)
+}
+
 // Filters returns everything the sidebar needs before any search:
 // all platforms and regions, and the cheapest/most expensive listed price.
 func (s *Store) Filters(ctx context.Context) (Filters, error) {
@@ -220,6 +266,9 @@ func (s *Store) Filters(ctx context.Context) (Filters, error) {
 	}
 	if f.Regions, err = s.namedList(ctx, "SELECT slug, name FROM regions ORDER BY id"); err != nil {
 		return f, err
+	}
+	for _, t := range []string{"game", "dlc", "gift_card", "subscription"} {
+		f.Types = append(f.Types, Named{Slug: t, Name: typeNames[t]})
 	}
 	err = s.db.QueryRow(ctx, listingCTE+`
         SELECT coalesce(min(price_cents), 0), coalesce(max(price_cents), 0) FROM listing`,

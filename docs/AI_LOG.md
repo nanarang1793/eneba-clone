@@ -548,3 +548,60 @@ The assistant explained that the Day 4 push had already gone through ("nothing t
 **Not done (in the README):** real payments, emailing keys, refunds. The concurrency test is a Python script for now; it becomes a Go test on day 7.
 
 **Next (day 6):** the data-driven homepage (layout and blocks from the database, each block from its own provider), styling polish, loading/empty/error states and a mobile pass.
+
+## Session 7 — 2026-11-16 (Day 6)
+
+### Prompt 1
+
+> do the next part
+
+### Response 1
+
+*(Work done: built and tested in the assistant's workspace against Postgres 16 with the project's migrations and seed, then wrote the files into `Downloads\eneba-clone`.)*
+
+**Backend**
+- `internal/home/` (new):
+  - `providers.go` defines a `Provider` interface (`Load(ctx, config) (any, error)`) with one implementation per block type: `banner` (the `banners` table, filtered by optional start and end dates), `best_sellers`, `deals` (at least `min_discount_pct`, biggest discount first), `new_releases` and `by_type`.
+  - Product rows keep one card per game with `DISTINCT ON (title)`, so "Bestsellers" isn't Elden Ring three times.
+  - Each product row also returns a `see_all_url`, so the backend decides where "See all" goes.
+- `internal/home/handler.go`:
+  - `GET /home/layout` lists the active blocks in order, skipping types the server doesn't know.
+  - `GET /home/blocks/{id}` returns `{id, type, title, data}`, with a 404 for unknown or inactive blocks.
+- `internal/catalog`:
+  - A `type` filter for the store (`?type=gift_card`, several allowed), with facet counts. Product types are a Postgres enum, not a table, so the options come from `unnest(enum_range(NULL::product_type))`.
+  - `/filters` now lists the types.
+  - New `Cards(ctx, cond, order, limit, args...)`, which the homepage providers use. The SQL fragments are written in our own code, and values always go in as `$n` placeholders.
+- **Migration `000006_banner_links`** and the seed generator: the "Big RPG Week" banner linked to `/store?q=rpg`, which returns nothing because search only matches product names. It's now "Bestselling games" → `/store?type=game&sort=popular`. The regenerated `seed.sql` differs from the old one by exactly that line.
+
+**Frontend**
+- `features/home/HomePage.tsx`:
+  - It loads the layout, then renders one `HomeBlock` per entry. Each block runs its own query, with its own skeleton while loading and its own error card with "Try again".
+  - A `switch` on the block type picks `BannerCarousel` or `ProductRow`; unknown types render nothing, so an older frontend survives a newer backend.
+- `BannerCarousel`: gradient slides (no copied art), title, subtitle and a yellow call-to-action button. It rotates every 6 s, pauses while hovered, and has dot buttons with labels for screen readers.
+- `ProductRow`: a title, "See all ›", and a sideways-scrolling row of the existing product cards, which snap into place on touch screens.
+- `/` is now the homepage (it used to redirect to `/store`).
+- Store sidebar: a new "Type" filter (Games, DLC, Gift cards, Subscriptions) with counts. It's in the URL like the others, and "Clear all" resets it.
+- Polish:
+  - **Header on phones:** logo and icons on one row, full-width search below.
+  - **`ScrollToTop`:** a new page starts at the top. It reacts only to path changes, so ticking filters doesn't jump.
+  - **`ErrorBoundary`** around each page: a rendering crash shows "Something went wrong" with a Reload button instead of a blank screen, and it resets when you navigate.
+  - **Footer** with links.
+  - **`usePageTitle`** gives every page its own tab title.
+
+**Testing done**
+- API:
+  - The layout lists 6 blocks. Each block returns the right data with no duplicate titles (12/12/12/12/12/7 cards), deals are all at least 40% off, and gift cards and subscriptions are the right types. Unknown or invalid block ids return 404.
+  - `?type=gift_card` gives 15 products. `type=game&platform=steam` gives 42, and the type counts ignore the type filter, the same rule as platform and region.
+- Browser, 10 checks:
+  - The homepage shows the banner and 5 rows, and the banner dots switch slides. "Shop bestsellers" opens the store with "Games" ticked (169 results), and "See all" on Gift cards opens `?type=gift_card`. Gift cards + Subscriptions gives 22, and "Clear all" removes the type.
+  - Opening a product from 2,265 px down the store lands at the top of the page, with the right tab title.
+  - **Breaking the "Gift cards" block's config in the database** showed an error card for that block only, with the other rows working; fixing the data and clicking "Try again" brought it back.
+  - **Hiding "New releases" and moving "Subscriptions" to the top in the database** changed the page on reload, with no code change.
+  - Phone-sized screen (390 px): home, store, product, cart and login have no sideways scrolling.
+- Regressions: the Day 2 (13), Day 3 (16), Day 4 (15), Day 5 (11) suites and the 40-buyer race test all still pass. `tsc`, `vite build` and `go vet` are clean.
+
+**Bug found and fixed while testing**
+- **The whole app showed a blank page.** `ScrollToTop` was written as `useEffect(() => window.scrollTo(0, 0), …)`. In newer Chrome, `scrollTo()` returns a Promise, so the arrow function returned it, and React crashed ("destroy is not a function"), because an effect may only return a cleanup function. Wrapping the body in braces fixed it. The other one-line effects only call `setState`, which returns nothing, so they're safe.
+- The earlier Day 2 test assumed `/` redirects to `/store`; it now opens `/store` directly.
+
+**Next (day 7):** Go tests for the risky parts (key reservation under concurrency, search ranking, auth), the README's scope and trade-offs section, a final deploy, and finishing this log.

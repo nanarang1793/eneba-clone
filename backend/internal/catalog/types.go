@@ -40,6 +40,7 @@ type ListResult struct {
 	Facets     struct {
 		Platforms []FacetCount `json:"platforms"`
 		Regions   []FacetCount `json:"regions"`
+		Types     []FacetCount `json:"types"`
 	} `json:"facets"`
 }
 
@@ -47,6 +48,7 @@ type ListResult struct {
 type Filters struct {
 	Platforms []Named `json:"platforms"`
 	Regions   []Named `json:"regions"`
+	Types     []Named `json:"types"`
 	Price     struct {
 		MinCents int `json:"min_cents"`
 		MaxCents int `json:"max_cents"`

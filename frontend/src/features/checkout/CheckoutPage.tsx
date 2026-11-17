@@ -5,6 +5,7 @@ import { getOrder, payOrder } from "../../api/orders";
 import { formatPrice } from "../../components/ui/Price";
 import { useCart } from "../cart/cartStore";
 import { useCountdown } from "./useCountdown";
+import { usePageTitle } from "../../components/usePageTitle";
 
 const SUCCESS_CARD = "4242 4242 4242 4242";
 const DECLINE_CARD = "4000 0000 0000 0002";
@@ -19,6 +20,7 @@ export function CheckoutPage() {
   const queryClient = useQueryClient();
   const clearCart = useCart((s) => s.clear);
   const [card, setCard] = useState("");
+  usePageTitle("Checkout");
 
   const order = useQuery({ queryKey: ["order", id], queryFn: () => getOrder(id) });
   const secondsLeft = useCountdown(order.data?.expires_at);

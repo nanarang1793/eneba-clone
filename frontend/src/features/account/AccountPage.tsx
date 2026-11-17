@@ -5,10 +5,12 @@ import { formatPrice } from "../../components/ui/Price";
 import { useCurrentUser } from "../auth/useCurrentUser";
 import { StatusBadge } from "../orders/StatusBadge";
 import { useLogout } from "../auth/useLogout";
+import { usePageTitle } from "../../components/usePageTitle";
 
 /** /account: only reachable when signed in (see RequireAuth in App.tsx). */
 export function AccountPage() {
   const { user } = useCurrentUser();
+  usePageTitle("My account");
   const signOut = useLogout();
   const orders = useQuery({ queryKey: ["orders"], queryFn: listOrders });
   if (!user) return null; // RequireAuth makes sure this doesn't happen

@@ -4,6 +4,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { register } from "../../api/auth";
 import { AuthCard, Field, FormError, SubmitButton } from "./AuthCard";
 import { ME_KEY, safeNext, useCurrentUser } from "./useCurrentUser";
+import { usePageTitle } from "../../components/usePageTitle";
 
 /**
  * /register: creating an account also signs you in (the backend sets the
@@ -17,6 +18,7 @@ export function RegisterPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { user } = useCurrentUser();
+  usePageTitle("Create an account");
 
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");

@@ -32,6 +32,7 @@ type ListParams struct {
 	Q         string   // search text, already trimmed; "" means no search
 	Platforms []string // platform slugs, e.g. ["steam", "xbox"]; empty means all
 	Regions   []string // region slugs
+	Types     []string // game | dlc | gift_card | subscription
 	MinCents  *int     // nil means no lower bound
 	MaxCents  *int
 	Sort      string
@@ -46,6 +47,7 @@ func ParseListParams(v url.Values) (ListParams, error) {
 		Q:         strings.TrimSpace(v.Get("q")),
 		Platforms: slugList(v["platform"]),
 		Regions:   slugList(v["region"]),
+		Types:     slugList(v["type"]),
 		Sort:      v.Get("sort"),
 		Page:      1,
 		PerPage:   defaultPerPage,

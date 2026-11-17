@@ -396,7 +396,7 @@ INSERT INTO home_blocks (type, title, position, config) VALUES
 
 INSERT INTO banners (title, subtitle, cta_label, cta_url, position) VALUES
   ('Top up and save',            'Gift cards for every platform, delivered instantly', 'Shop gift cards', '/store?type=gift_card', 1),
-  ('Big RPG Week',               'Up to 60% off the biggest role-playing games',       'See deals',       '/store?q=rpg&sort=price_asc', 2),
+  ('Bestselling games',          'The games everyone is buying right now',             'Shop bestsellers', '/store?type=game&sort=popular', 2),
   ('New this season',            'The latest releases from verified sellers',          'Browse new',      '/store?sort=newest', 3);
 
 -- Demo account: demo@eneba.test / demo1234 (bcrypt via pgcrypto).

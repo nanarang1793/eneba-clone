@@ -7,7 +7,7 @@ A digital-key marketplace in Eneba's style. React + TypeScript frontend, Go REST
 
 > The API runs on Render's free tier, which sleeps after ~15 minutes without traffic. The first request after a pause can take up to a minute while it wakes up; after that it's fast.
 
-> Status: **day 5.** Store, product page with seller offers, search with suggestions, accounts, and a full purchase: cart → server-priced checkout → keys reserved for 15 minutes → simulated payment → keys shown on the order page. Demo account: `demo@eneba.test` / `demo1234`. Test card: `4242 4242 4242 4242` (or `4000 0000 0000 0002` for a decline).
+> Status: **day 6.** Data-driven homepage (banner carousel + product rows, each from its own provider), store with filters/facets, product page with seller offers, search with suggestions, accounts, and a full purchase with real key reservation. Demo account: `demo@eneba.test` / `demo1234`. Test card: `4242 4242 4242 4242` (or `4000 0000 0000 0002` for a decline).
 
 ## Repo layout
 
@@ -17,6 +17,7 @@ backend/
   cmd/seedgen/    deterministic seed generator → seed/seed.sql
   internal/httpx/ JSON + shared error format + panic recoverer + JSON body decoding
   internal/auth/  store.go (users + sessions SQL) · handler.go (register/login/logout/me, cookie) · middleware.go (RequireUser)
+  internal/home/   handler.go (layout + block endpoints) · providers.go (one Provider per block type)
   internal/orders/ store.go (quote, order + key reservation, payment, history) · payments.go (PaymentProvider + simulated)
                   handler.go (HTTP) · types.go (JSON)
   internal/catalog/ params.go (validation) · store.go (list/facet/suggest SQL) · product.go (product + offers SQL)
@@ -26,11 +27,12 @@ backend/
 frontend/src/
   api/            fetch client (ApiError) + typed endpoint functions
   app/            routes
-  components/     layout (Header, Layout) and ui (Price, Cover)
+  components/     layout (Header, Layout, ScrollToTop, ErrorBoundary), ui (Price, Cover), usePageTitle
   features/store/ StorePage, FilterSidebar, SortSelect, ProductCard, Pagination, useStoreParams (URL state)
   features/product/ ProductPage, OffersTable
   features/search/  SearchBox (suggestions dropdown), useDebouncedValue
   features/auth/    LoginPage, RegisterPage, RequireAuth (protected routes), useCurrentUser, useLogout
+  features/home/    HomePage (loads the layout, then each block on its own), BannerCarousel, ProductRow
   features/account/ AccountPage (profile + order history)
   features/cart/    cartStore (zustand, saved in localStorage), CartPage
   features/checkout/ CheckoutPage (countdown, test cards), useCountdown
@@ -61,7 +63,7 @@ Frontend edits hot-reload as usual. After changing Go code, run `docker compose 
 
 ```powershell
 docker compose up -d db                 # Postgres on localhost:5432
-docker compose run --rm migrate up      # create tables
+docker compose run --rm migrate up      # create tables (and apply new migrations later)
 docker compose run --rm seed            # load the 200 demo products
 cd backend;  go run ./cmd/api           # API on http://localhost:8080 (leave running)
 # in a second terminal:
@@ -102,6 +104,8 @@ Codes: `invalid_parameter` (400), `not_found` (404), `method_not_allowed` (405),
 | `POST /api/auth/login` | `{email, password}` → 200 + user and the session cookie. 401 `invalid_credentials` for both an unknown email and a wrong password |
 | `POST /api/auth/logout` | Deletes the session and the cookie → 204 |
 | `GET /api/auth/me` | `{"user": {...}}` when signed in, `{"user": null}` when not (always 200: being signed out isn't an error) |
+| `GET /api/home/layout` | `{blocks: [{id, type, title}]}`: the homepage's active blocks in order (from `home_blocks`) |
+| `GET /api/home/blocks/{id}` | `{id, type, title, data}`: one block's content from its provider. Product blocks return `{items, see_all_url}`, the banner block `{items: [banners]}` |
 | `POST /api/cart/quote` | `{items: [{offer_id, qty}]}` → each line priced from the database with a `status` (`ok`, `not_enough_stock`, `sold_out`, `unavailable`), plus `total_cents` and `all_available`. Public |
 | `POST /api/orders` | 🔒 Header `Idempotency-Key` + `{items}` → 201 pending order with keys reserved for 15 minutes (`expires_at`). Same key again → 200 with the same order. 409 `out_of_stock` if any line can't be filled (nothing is saved). Starting a new checkout releases your previous unpaid order |
 | `POST /api/orders/{id}/pay` | 🔒 `{card_number}` → 200 paid order with keys. 402 `payment_declined` (keys released, order `failed`), 409 `reservation_expired`, 400 `invalid_card`. Paying a paid order again is harmless |
@@ -117,11 +121,12 @@ Codes: `invalid_parameter` (400), `not_found` (404), `method_not_allowed` (405),
 | `q` | `eldn ring`, `gta` | Typo-tolerant search: substring match **or** trigram word similarity (`pg_trgm`), after expanding common short names (`gta`, `cod`, `bg3`, `rdr2`, `fifa`… see `backend/internal/catalog/synonyms.go`). Max 100 chars |
 | `platform` | `steam` or `steam,xbox` or repeated | Any of the listed platforms |
 | `region` | `global` | Same rules as `platform` |
+| `type` | `gift_card` | `game`, `dlc`, `gift_card`, `subscription`; same rules as `platform` |
 | `min_price`, `max_price` | `10`, `29.99` | Euros; compared with the cheapest in-stock offer |
 | `sort` | `relevance` (default), `popular`, `price_asc`, `price_desc`, `newest` | Relevance without `q` = popular |
 | `page`, `per_page` | `2`, `24` | `per_page` 1–60, default 24 |
 
-Response: `{ items, total, page, per_page, total_pages, facets: { platforms: [{slug,name,count}], regions: [...] } }`.
+Response: `{ items, total, page, per_page, total_pages, facets: { platforms: [{slug,name,count}], regions: [...], types: [...] } }`.
 
 Only products that can be bought right now are listed (an active offer with at least one usable key); `price_cents` is the cheapest such offer. Facet counts apply every filter **except their own**, so ticking "Steam" still shows how many Xbox results you would get by adding Xbox.
 
@@ -194,4 +199,16 @@ The part of the app that has to be right: **one key must never be sold to two bu
 **Tested** with 40 buyers ordering the same offer at the same instant, on offers with 3 keys left, repeated on 5 different offers. Every time exactly 3 got an order, 37 got `out_of_stock`, and the 3 keys handed out were all different. 40 identical requests from one user with the same Idempotency-Key created exactly one order. Afterwards the whole database had no key linked to two order lines, and no sold key without a paid order.
 
 **Not done (would be next):** real payments (Stripe test mode would be a new `PaymentProvider`), emailing keys, refunds.
+
+## Homepage blocks
+
+The homepage layout lives in the database, not in the frontend code:
+
+- `home_blocks` lists the blocks: type, title, position, an `is_active` switch and a JSON `config` (for example `{"limit": 12, "min_discount_pct": 40}`).
+- `GET /api/home/layout` returns the active blocks in order. The frontend then fetches **each block separately** from `GET /api/home/blocks/{id}`.
+- Every block type has its own **provider** behind one Go interface (`home.Provider`): `banner` (its own `banners` table, with optional start and end dates), `best_sellers`, `deals`, `new_releases` and `by_type`. Each runs its own query and keeps one card per game, so the same title doesn't fill a row three times.
+- Because blocks load independently, a slow or failing block shows its own error card with "Try again", and the rest of the page works. (Tested by breaking one block's config in the database.)
+- Reordering, retitling or hiding a block is a database change, with no deploy. (Tested: hiding "New releases" and moving "Subscriptions" to the top changed the page on reload.)
+
+**Trade-off vs. the brief:** the brief says each block should get its content "from its own backend service or database". Here the providers are separate modules in one Go service rather than separate deployed services. On free hosting, several services would mean several cold starts and deploys without showing much more. Each provider can still be moved into its own service by replacing it with an HTTP call; the frontend wouldn't change.
 

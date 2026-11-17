@@ -1,6 +1,7 @@
-import { Link, Navigate, Route, Routes } from "react-router";
+import { Link, Route, Routes } from "react-router";
 import { Layout } from "../components/layout/Layout";
 import { AccountPage } from "../features/account/AccountPage";
+import { HomePage } from "../features/home/HomePage";
 import { LoginPage } from "../features/auth/LoginPage";
 import { RegisterPage } from "../features/auth/RegisterPage";
 import { RequireAuth } from "../features/auth/RequireAuth";
@@ -14,8 +15,7 @@ export function App() {
   return (
     <Routes>
       <Route element={<Layout />}>
-        {/* The data-driven homepage comes on day 6; until then / opens the store. */}
-        <Route index element={<Navigate to="/store" replace />} />
+        <Route index element={<HomePage />} />
         <Route path="store" element={<StorePage />} />
         <Route path="product/:slug" element={<ProductPage />} />
         <Route path="cart" element={<CartPage />} />

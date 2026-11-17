@@ -16,9 +16,9 @@ import { useSearchParams } from "react-router";
 export const PER_PAGE = 24;
 
 // Keys we forward to the API. Anything else in the URL is ignored.
-const API_KEYS = ["q", "platform", "region", "min_price", "max_price", "sort", "page"] as const;
+const API_KEYS = ["q", "platform", "region", "type", "min_price", "max_price", "sort", "page"] as const;
 
-export type ListKey = "platform" | "region";
+export type ListKey = "platform" | "region" | "type";
 
 export function useStoreParams() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -27,6 +27,7 @@ export function useStoreParams() {
     q: searchParams.get("q") ?? "",
     platforms: searchParams.getAll("platform"),
     regions: searchParams.getAll("region"),
+    types: searchParams.getAll("type"),
     minPrice: searchParams.get("min_price") ?? "",
     maxPrice: searchParams.get("max_price") ?? "",
     sort: searchParams.get("sort") ?? "relevance",
@@ -83,7 +84,7 @@ export function useStoreParams() {
   function clearFilters() {
     // Keep the search text and sort; drop everything the sidebar controls.
     update((next) => {
-      for (const key of ["platform", "region", "min_price", "max_price"]) next.delete(key);
+      for (const key of ["platform", "region", "type", "min_price", "max_price"]) next.delete(key);
     });
   }
 

@@ -17,6 +17,7 @@ import (
 
 	"eneba/backend/internal/auth"
 	"eneba/backend/internal/catalog"
+	"eneba/backend/internal/home"
 	"eneba/backend/internal/httpx"
 	"eneba/backend/internal/orders"
 )
@@ -60,7 +61,9 @@ func newRouter(db *pgxpool.Pool) http.Handler {
 	r.NotFound(httpx.NotFound)
 	r.MethodNotAllowed(httpx.MethodNotAllowed)
 
-	catalogHandler := catalog.NewHandler(catalog.NewStore(db))
+	catalogStore := catalog.NewStore(db)
+	catalogHandler := catalog.NewHandler(catalogStore)
+	homeHandler := home.NewHandler(db, catalogStore)
 	authHandler := auth.NewHandler(auth.NewStore(db))
 	ordersHandler := orders.NewHandler(orders.NewStore(db, orders.SimulatedPayments{}))
 
@@ -75,6 +78,7 @@ func newRouter(db *pgxpool.Pool) http.Handler {
 		catalogHandler.Routes(r)
 		authHandler.Routes(r)
 		ordersHandler.Routes(r, authHandler.RequireUser)
+		homeHandler.Routes(r)
 	})
 	return r
 }

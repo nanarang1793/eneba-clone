@@ -4,6 +4,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { login } from "../../api/auth";
 import { AuthCard, Field, FormError, SubmitButton } from "./AuthCard";
 import { ME_KEY, safeNext, useCurrentUser } from "./useCurrentUser";
+import { usePageTitle } from "../../components/usePageTitle";
 
 /**
  * /login?next=/account
@@ -15,6 +16,7 @@ export function LoginPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { user } = useCurrentUser();
+  usePageTitle("Sign in");
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");

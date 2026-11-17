@@ -4,10 +4,12 @@ import { useQuery } from "@tanstack/react-query";
 import { getOrder } from "../../api/orders";
 import { formatPrice } from "../../components/ui/Price";
 import { StatusBadge } from "./StatusBadge";
+import { usePageTitle } from "../../components/usePageTitle";
 
 /** /orders/:id: one order. Once it's paid, this is where the keys are. */
 export function OrderPage() {
   const { id = "" } = useParams();
+  usePageTitle("Order");
   const order = useQuery({ queryKey: ["order", id], queryFn: () => getOrder(id) });
 
   if (order.isError) {

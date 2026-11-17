@@ -25,12 +25,13 @@ export type ProductList = {
   page: number;
   per_page: number;
   total_pages: number;
-  facets: { platforms: FacetCount[]; regions: FacetCount[] };
+  facets: { platforms: FacetCount[]; regions: FacetCount[]; types: FacetCount[] };
 };
 
 export type Filters = {
   platforms: Named[];
   regions: Named[];
+  types: Named[];
   price: { min_cents: number; max_cents: number };
   sorts: string[];
 };
@@ -120,3 +121,20 @@ export type Order = {
     keys: string[];
   }[];
 };
+
+/** Homepage (GET /api/home/layout and /api/home/blocks/{id}). */
+export type BlockInfo = { id: number; type: string; title: string };
+
+export type Banner = {
+  id: number;
+  title: string;
+  subtitle: string | null;
+  image_url: string | null;
+  cta_label: string;
+  cta_url: string;
+};
+
+/** A block's data depends on its type. */
+export type Block =
+  | (BlockInfo & { type: "banner"; data: { items: Banner[] } })
+  | (BlockInfo & { type: "best_sellers" | "deals" | "new_releases" | "by_type"; data: { items: Product[]; see_all_url: string } });
