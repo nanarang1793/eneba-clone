@@ -7,7 +7,7 @@ A digital-key marketplace in Eneba's style. React + TypeScript frontend, Go REST
 
 > The API runs on Render's free tier, which sleeps after ~15 minutes without traffic. The first request after a pause can take up to a minute while it wakes up; after that it's fast.
 
-> Status: **day 4.** Store page (filters, sorting, pagination, facet counts); product page with every seller's offer; header search with suggestions and synonyms; accounts: register, sign in/out with a server-side session cookie, an account page only signed-in users can open. Demo account: `demo@eneba.test` / `demo1234`.
+> Status: **day 5.** Store, product page with seller offers, search with suggestions, accounts, and a full purchase: cart → server-priced checkout → keys reserved for 15 minutes → simulated payment → keys shown on the order page. Demo account: `demo@eneba.test` / `demo1234`. Test card: `4242 4242 4242 4242` (or `4000 0000 0000 0002` for a decline).
 
 ## Repo layout
 
@@ -17,6 +17,8 @@ backend/
   cmd/seedgen/    deterministic seed generator → seed/seed.sql
   internal/httpx/ JSON + shared error format + panic recoverer + JSON body decoding
   internal/auth/  store.go (users + sessions SQL) · handler.go (register/login/logout/me, cookie) · middleware.go (RequireUser)
+  internal/orders/ store.go (quote, order + key reservation, payment, history) · payments.go (PaymentProvider + simulated)
+                  handler.go (HTTP) · types.go (JSON)
   internal/catalog/ params.go (validation) · store.go (list/facet/suggest SQL) · product.go (product + offers SQL)
                   synonyms.go (search short names) · handler.go (HTTP) · types.go (JSON)
   migrations/     golang-migrate SQL files (NNNNNN_name.up.sql / .down.sql)
@@ -29,7 +31,10 @@ frontend/src/
   features/product/ ProductPage, OffersTable
   features/search/  SearchBox (suggestions dropdown), useDebouncedValue
   features/auth/    LoginPage, RegisterPage, RequireAuth (protected routes), useCurrentUser, useLogout
-  features/account/ AccountPage
+  features/account/ AccountPage (profile + order history)
+  features/cart/    cartStore (zustand, saved in localStorage), CartPage
+  features/checkout/ CheckoutPage (countdown, test cards), useCountdown
+  features/orders/  OrderPage (keys + copy button), StatusBadge
   styles/         Tailwind + Eneba design tokens
 docs/AI_LOG.md    full AI conversation log (assignment deliverable)
 docker-compose.yml
@@ -97,6 +102,13 @@ Codes: `invalid_parameter` (400), `not_found` (404), `method_not_allowed` (405),
 | `POST /api/auth/login` | `{email, password}` → 200 + user and the session cookie. 401 `invalid_credentials` for both an unknown email and a wrong password |
 | `POST /api/auth/logout` | Deletes the session and the cookie → 204 |
 | `GET /api/auth/me` | `{"user": {...}}` when signed in, `{"user": null}` when not (always 200: being signed out isn't an error) |
+| `POST /api/cart/quote` | `{items: [{offer_id, qty}]}` → each line priced from the database with a `status` (`ok`, `not_enough_stock`, `sold_out`, `unavailable`), plus `total_cents` and `all_available`. Public |
+| `POST /api/orders` | 🔒 Header `Idempotency-Key` + `{items}` → 201 pending order with keys reserved for 15 minutes (`expires_at`). Same key again → 200 with the same order. 409 `out_of_stock` if any line can't be filled (nothing is saved). Starting a new checkout releases your previous unpaid order |
+| `POST /api/orders/{id}/pay` | 🔒 `{card_number}` → 200 paid order with keys. 402 `payment_declined` (keys released, order `failed`), 409 `reservation_expired`, 400 `invalid_card`. Paying a paid order again is harmless |
+| `GET /api/orders` | 🔒 Your 50 latest orders |
+| `GET /api/orders/{id}` | 🔒 One of your orders; `keys` filled once paid. Other people's orders → 404 |
+
+🔒 = needs a signed-in session (401 otherwise).
 
 `GET /api/products` parameters (all optional):
 
@@ -160,4 +172,26 @@ Every push to `main` redeploys both Render and Vercel.
 - **Redirects after sign-in** (`/login?next=…`) only accept paths on this site, so the login page can't send people to `//evil.com`.
 - **Protected pages:** `RequireAuth` on the frontend only hides pages. The real protection is `RequireUser` on the backend, which answers 401 without a valid session.
 - **Not done (would be next):** rate limiting login attempts, email verification, password reset.
+
+## Checkout and key reservation
+
+The part of the app that has to be right: **one key must never be sold to two buyers.**
+
+1. **The cart lives in the browser** (`localStorage`), so guests can fill it. It only stores offer ids and quantities the server cares about; `POST /cart/quote` reprices it from the database every time, so a tampered cart can't change what anyone pays.
+2. **`POST /orders` runs one transaction:** read current prices, insert the order and its lines (price and seller copied, so history stays correct), then reserve keys with:
+   ```sql
+   UPDATE product_keys SET status = 'reserved', reserved_until = $3, order_item_id = $2
+   WHERE id IN (SELECT id FROM product_keys
+                WHERE offer_id = $1 AND <usable>
+                ORDER BY id LIMIT $4
+                FOR UPDATE SKIP LOCKED)
+   ```
+   `FOR UPDATE` locks the chosen keys until the transaction ends; `SKIP LOCKED` makes simultaneous checkouts take *different* free keys instead of waiting. If any line gets fewer keys than asked, the whole transaction rolls back.
+3. **Idempotency-Key:** the browser sends one random key per checkout attempt. A double click or a retry returns the same order instead of reserving twice (enforced by a `UNIQUE (user_id, idempotency_key)` constraint, so even two requests at the same instant make one order).
+4. **Reservations expire after 15 minutes without a background job:** a key counts as free once `reserved_until` has passed, and unpaid orders are marked `expired` when they're read. A user also has at most one unpaid order; starting a new checkout releases the old one's keys.
+5. **Pay** locks the order row (so two Pay clicks can't both charge), checks the order still holds all its keys, then charges through a `PaymentProvider` interface. The simulated provider approves `4242 4242 4242 4242` and declines `4000 0000 0000 0002`. On success the keys become `sold`; on a decline they're released immediately.
+
+**Tested** with 40 buyers ordering the same offer at the same instant, on offers with 3 keys left, repeated on 5 different offers. Every time exactly 3 got an order, 37 got `out_of_stock`, and the 3 keys handed out were all different. 40 identical requests from one user with the same Idempotency-Key created exactly one order. Afterwards the whole database had no key linked to two order lines, and no sold key without a paid order.
+
+**Not done (would be next):** real payments (Stripe test mode would be a new `PaymentProvider`), emailing keys, refunds.
 

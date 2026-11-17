@@ -73,3 +73,50 @@ export type User = {
   display_name: string;
   created_at: string;
 };
+
+/** Mirrors backend/internal/orders/types.go. */
+export type CartLineInput = { offer_id: number; qty: number };
+
+export type ProductRef = {
+  slug: string;
+  name: string;
+  title: string;
+  image_url: string | null;
+  platform: string;
+  region: string;
+};
+
+export type QuoteLine = {
+  offer_id: number;
+  qty: number;
+  status: "ok" | "not_enough_stock" | "sold_out" | "unavailable";
+  product: ProductRef | null;
+  seller_name: string;
+  price_cents: number;
+  stock: number;
+  line_total_cents: number;
+};
+
+export type Quote = { items: QuoteLine[]; total_cents: number; all_available: boolean };
+
+export type OrderStatus = "pending" | "paid" | "failed" | "expired";
+
+export type Order = {
+  id: string;
+  status: OrderStatus;
+  total_cents: number;
+  currency: string;
+  created_at: string;
+  expires_at: string;
+  paid_at: string | null;
+  payment_ref: string | null;
+  items: {
+    id: number;
+    offer_id: number;
+    product: ProductRef;
+    seller_name: string;
+    unit_price_cents: number;
+    quantity: number;
+    keys: string[];
+  }[];
+};

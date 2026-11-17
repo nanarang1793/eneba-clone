@@ -15,12 +15,17 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(method: "GET" | "POST", path: string, options: { params?: URLSearchParams; body?: unknown } = {}) {
+type RequestOptions = { params?: URLSearchParams; body?: unknown; headers?: Record<string, string> };
+
+export async function apiRequest<T>(method: "GET" | "POST", path: string, options: RequestOptions = {}) {
   const query = options.params?.toString();
+  const headers: Record<string, string> = { ...options.headers };
+  // The backend only accepts JSON bodies (see httpx.DecodeJSON).
+  if (options.body !== undefined) headers["Content-Type"] = "application/json";
+
   const res = await fetch(`/api${path}${query ? `?${query}` : ""}`, {
     method,
-    // The backend only accepts JSON bodies (see httpx.DecodeJSON).
-    headers: options.body !== undefined ? { "Content-Type": "application/json" } : undefined,
+    headers,
     body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
   });
 
@@ -38,6 +43,6 @@ async function request<T>(method: "GET" | "POST", path: string, options: { param
   return body as T;
 }
 
-export const apiGet = <T>(path: string, params?: URLSearchParams) => request<T>("GET", path, { params });
+export const apiGet = <T>(path: string, params?: URLSearchParams) => apiRequest<T>("GET", path, { params });
 
-export const apiPost = <T>(path: string, body?: unknown) => request<T>("POST", path, { body });
+export const apiPost = <T>(path: string, body?: unknown) => apiRequest<T>("POST", path, { body });

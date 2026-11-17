@@ -17,10 +17,10 @@ type Store struct {
 
 func NewStore(db *pgxpool.Pool) *Store { return &Store{db: db} }
 
-// usableKey is the SQL condition for a key that can still be sold: it's
+// UsableKey is the SQL condition for a key that can still be sold: it's
 // available, or it was reserved but the reservation has expired (see the data
 // model notes in the README). Stock everywhere is a count of these.
-const usableKey = `(k.status = 'available' OR (k.status = 'reserved' AND k.reserved_until < now()))`
+const UsableKey = `(k.status = 'available' OR (k.status = 'reserved' AND k.reserved_until < now()))`
 
 // listingCTE is the "what can you buy right now" view of the catalog:
 // one row per product that has at least one active offer with a usable key,
@@ -39,7 +39,7 @@ WITH listing AS (
     JOIN offers    o  ON o.product_id = p.id AND o.is_active
     WHERE EXISTS (
         SELECT 1 FROM product_keys k
-        WHERE k.offer_id = o.id AND ` + usableKey + `
+        WHERE k.offer_id = o.id AND ` + UsableKey + `
     )
     GROUP BY p.id, pl.id, r.id
 )`

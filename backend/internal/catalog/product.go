@@ -30,7 +30,7 @@ func (s *Store) ProductBySlug(ctx context.Context, slug string) (ProductDetail, 
             SELECT min(o.price_cents) AS min_price, count(*) AS offers
             FROM offers o
             WHERE o.product_id = p.id AND o.is_active
-              AND EXISTS (SELECT 1 FROM product_keys k WHERE k.offer_id = o.id AND `+usableKey+`)
+              AND EXISTS (SELECT 1 FROM product_keys k WHERE k.offer_id = o.id AND `+UsableKey+`)
         ) stock ON true
         WHERE p.slug = $1`, slug,
 	).Scan(&d.ID, &d.Slug, &d.Name, &d.Title, &d.Type, &d.Description, &d.ImageURL,
@@ -92,7 +92,7 @@ func (s *Store) OffersBySlug(ctx context.Context, slug string) ([]Offer, error) 
         JOIN sellers s ON s.id = o.seller_id
         -- number of usable keys for this offer
         JOIN LATERAL (
-            SELECT count(*) AS n FROM product_keys k WHERE k.offer_id = o.id AND `+usableKey+`
+            SELECT count(*) AS n FROM product_keys k WHERE k.offer_id = o.id AND `+UsableKey+`
         ) stock ON true
         WHERE o.product_id = $1 AND o.is_active
         ORDER BY (stock.n > 0) DESC, o.price_cents ASC, s.rating DESC, o.id`, productID)

@@ -455,3 +455,96 @@ It also tested whether day 2 could be built in its workspace. It can't: package 
 **Not done (noted in the README):** rate limiting login attempts, email verification, password reset.
 
 **Next (day 5):** a cart in the browser, a price quote from the server, and orders that reserve real keys inside a transaction (`FOR UPDATE SKIP LOCKED`). Then a simulated payment and order history that shows the keys.
+
+## Session 6 — 2026-11-16 (Day 5)
+
+### Prompts 1–3
+
+> next step / *(screenshot: `git push` of day 4 succeeded, then "nothing to commit")* / it works
+
+### Responses 1–3
+
+The assistant explained that the Day 4 push had already gone through ("nothing to commit" only meant the second run had nothing new), and listed what to check on the live site: sign in with the demo account, refresh, sign out. The user confirmed that signing in works on the live Vercel site, so the session cookie makes it through the Vercel → Render rewrite.
+
+### Prompt 4
+
+> do day 5
+
+### Response 4
+
+*(Work done: built and tested in the assistant's workspace against Postgres 16 with the project's migrations and seed, then wrote the files into `Downloads\eneba-clone`.)*
+
+**Backend** (`backend/internal/orders/`, new)
+- `types.go`: JSON shapes for cart lines, quotes and orders.
+- `payments.go`: a `PaymentProvider` interface and `SimulatedPayments`. `4242 4242 4242 4242` is approved, `4000 0000 0000 0002` is declined, and anything else is an invalid card. Stripe would be a second implementation of the same interface.
+- `store.go`:
+  - **`Quote`** prices a cart from the database and gives each line a status: `ok`, `not_enough_stock`, `sold_out` or `unavailable`. Duplicate lines are merged; at most 20 lines and 1–10 keys each.
+  - **`CreateOrder`** does everything in one transaction:
+    1. It closes the user's previous unpaid order and releases its keys.
+    2. It reads current prices and inserts the order.
+    3. For each line it inserts an `order_items` row (price and seller copied) and reserves keys with `UPDATE … WHERE id IN (SELECT … FOR UPDATE SKIP LOCKED LIMIT qty)`.
+    4. If a line gets too few keys, the whole thing rolls back.
+    5. The `Idempotency-Key` is checked first. If two identical requests race, the `UNIQUE (user_id, idempotency_key)` violation (`23505`) returns the first request's order.
+  - **`Pay`**:
+    - It locks the order row (`FOR UPDATE`), so double-clicking Pay can't charge twice.
+    - It locks the order's still-valid reserved keys and checks it holds all of them; if not, the order is marked `expired` and its keys released.
+    - It charges the card. A decline marks the order `failed` and releases the keys at once; an invalid card changes nothing.
+    - On success the keys become `sold`, the order is `paid`, and the product and seller sales counters go up.
+  - **`Get` / `List`** first mark the user's unpaid orders older than 15 minutes as `expired` (checked on read, no background job). Other users' orders return "not found", and keys are only included for paid orders.
+- `handler.go`:
+  - `POST /cart/quote` is public.
+  - `POST /orders`, `GET /orders`, `GET /orders/{id}` and `POST /orders/{id}/pay` sit behind `auth.RequireUser`.
+  - Error codes: `out_of_stock` (409), `payment_declined` (402), `reservation_expired` (409), `order_not_pending` (409), `invalid_card` (400).
+- `catalog.UsableKey` is now exported, so the catalog and orders share the exact same "can this key be sold" rule.
+
+**Frontend**
+- `zustand` (with its `persist` middleware) for the cart. `features/cart/cartStore.ts` keeps `offer_id`, `qty` and a snapshot of name, seller and price, used only to draw the cart instantly and to show "price changed".
+- Product page:
+  - "Add to cart" works and briefly shows "Added ✓", then "N in cart". You can't add more than the seller's stock or 10.
+  - Header cart icon with a count badge.
+- `CartPage`:
+  - Lines from the browser, with real prices and stock from `/cart/quote`, and messages for "Only N left (Change to N)", sold out, no longer available, and "Price changed from €x".
+  - Checkout is disabled until every line is buyable. Signed-out users get "Sign in to check out", which returns to the cart.
+  - One `Idempotency-Key` (`crypto.randomUUID()`) per cart content.
+- `CheckoutPage`: a 15-minute countdown, a card field with clickable test cards, and the server's error messages. A decline or expired reservation shows a "Back to cart" page; success clears the cart and opens the order.
+- `OrderPage`: status badge, payment reference, lines and the keys, each with a Copy button.
+- The account page now lists your orders.
+
+**Testing done**
+- API (curl/Python):
+  - The quote with duplicates, a sold-out offer, an inactive offer and a missing offer gave the right statuses and total. A too-large quantity is reported as not enough stock, and invalid carts return 400.
+  - Ordering while signed out gives 401, and no Idempotency-Key gives 400.
+  - A new order is 201 with keys `reserved` and `expires_at` 900 s after creation. The same key again returns 200 with the same order (one row in the database).
+  - An invalid card leaves the order pending. Paying works and shows 2 keys, which are `sold` in the database. Paying again is harmless, and another user gets 404.
+  - A decline gives 402, the order becomes `failed`, and its keys return to stock. Paying a failed order gives 409.
+  - An order with a sold-out line gives 409 and leaves no order row and no stray reservations.
+- Expiry:
+  - While buyer A holds every key, B is told sold out.
+  - After A's reservation expires, B can buy them; A's late payment gets `reservation_expired`, A's leftover keys go back on sale and B's key is untouched.
+  - Keys expiring while the order row is still "pending" are also caught at payment.
+  - Checking out twice in a row expires the first order, so the second can use the same keys.
+- **Concurrency** (`threading.Barrier`, 40 registered buyers firing at once), repeated on 5 offers with 3 keys left each:
+  - Every time exactly **3 × 201 and 37 × 409**, one key per order line, no line without keys.
+  - The 3 winners paying at the same moment got **3 different keys**.
+  - 40 identical requests from one user with the same Idempotency-Key gave **1 order** (1 × 201 + 39 × 200) with exactly the 2 keys asked for.
+  - Afterwards, across the whole table: no key linked to two order lines, and no sold key without a paid order.
+- Browser (Playwright + Chrome), 11 checks:
+  - Add to cart works while signed out (the badge counts up and the cart survives a reload), and cart totals match prices, including after "−".
+  - "Sign in to check out" leads to registering and back to the cart.
+  - **A double-click on Checkout created one order**, with the countdown at 14:59 and 2 keys reserved.
+  - An invalid card shows a message and the order stays pending. A decline shows "Payment declined", releases the keys and keeps the cart.
+  - Checking out again and paying shows the keys on the order page; they match the database, the Copy button puts them on the clipboard, and the cart is emptied.
+  - The account page lists both orders.
+  - A price raised in the database shows "Price changed from €5.19" and the new total. A sold-out line disables Checkout.
+  - A backdated order shows "Reservation expired", and another user opening the order gets "Order not found".
+- Regressions: the Day 2 (13), Day 3 (16) and Day 4 (15) suites still pass. `tsc`, `vite build` and `go vet` are clean.
+
+**Design changes and fixes while building**
+- **A user has at most one unpaid order.** Without this, going back from checkout to the cart and checking out again left the first order holding its keys for 15 minutes, which could block your own new order on a low-stock item.
+- **A decline releases the keys straight away** (the order becomes `failed`) instead of holding them until expiry. The cart is kept, so trying again is one click.
+- The offers table's buy button was first written as an inline `(() => …)()` block inside JSX; it became a small `BuyButton` component, which is easier to read and explain.
+- The header cart badge was moved onto the icon's corner after the screenshot check.
+
+**Not done (in the README):** real payments, emailing keys, refunds. The concurrency test is a Python script for now; it becomes a Go test on day 7.
+
+**Next (day 6):** the data-driven homepage (layout and blocks from the database, each block from its own provider), styling polish, loading/empty/error states and a mobile pass.

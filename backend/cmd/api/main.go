@@ -18,6 +18,7 @@ import (
 	"eneba/backend/internal/auth"
 	"eneba/backend/internal/catalog"
 	"eneba/backend/internal/httpx"
+	"eneba/backend/internal/orders"
 )
 
 func main() {
@@ -61,6 +62,7 @@ func newRouter(db *pgxpool.Pool) http.Handler {
 
 	catalogHandler := catalog.NewHandler(catalog.NewStore(db))
 	authHandler := auth.NewHandler(auth.NewStore(db))
+	ordersHandler := orders.NewHandler(orders.NewStore(db, orders.SimulatedPayments{}))
 
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -72,6 +74,7 @@ func newRouter(db *pgxpool.Pool) http.Handler {
 		})
 		catalogHandler.Routes(r)
 		authHandler.Routes(r)
+		ordersHandler.Routes(r, authHandler.RequireUser)
 	})
 	return r
 }

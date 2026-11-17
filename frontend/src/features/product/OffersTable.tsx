@@ -1,5 +1,8 @@
-import type { Offer } from "../../api/types";
+import { useState } from "react";
+import { Link } from "react-router";
+import type { Offer, ProductDetail } from "../../api/types";
 import { formatPrice } from "../../components/ui/Price";
+import { MAX_QTY, useCart } from "../cart/cartStore";
 
 const compact = new Intl.NumberFormat("en", { notation: "compact" }); // 184220 -> "184K"
 
@@ -9,7 +12,7 @@ const compact = new Intl.NumberFormat("en", { notation: "compact" }); // 184220 
  * The first in-stock row is flagged is_best and highlighted, like Eneba's
  * "best price" offer.
  */
-export function OffersTable({ offers }: { offers: Offer[] }) {
+export function OffersTable({ offers, product }: { offers: Offer[]; product: ProductDetail }) {
   if (offers.length === 0) {
     return <p className="rounded-lg bg-surface p-6 text-center text-muted">No sellers are offering this product right now.</p>;
   }
@@ -44,16 +47,53 @@ export function OffersTable({ offers }: { offers: Offer[] }) {
           {/* Price */}
           <p className="text-right text-xl font-bold sm:text-left">{formatPrice(o.price_cents)}</p>
 
-          {/* Buy: the cart and checkout arrive on day 5 */}
-          <button
-            disabled
-            title="Checkout is coming soon"
-            className="h-10 rounded-md bg-cta px-4 text-sm font-semibold text-page disabled:cursor-not-allowed disabled:opacity-60 max-sm:order-last"
-          >
-            {o.in_stock ? "Add to cart" : "Sold out"}
-          </button>
+          <BuyButton offer={o} product={product} />
         </li>
       ))}
     </ul>
+  );
+}
+
+/** "Add to cart" for one offer. Can't add more than the seller has, or more than MAX_QTY. */
+function BuyButton({ offer, product }: { offer: Offer; product: ProductDetail }) {
+  const add = useCart((s) => s.add);
+  const inCart = useCart((s) => s.lines.find((l) => l.offer_id === offer.id)?.qty ?? 0);
+  const [justAdded, setJustAdded] = useState(false);
+
+  const full = inCart >= Math.min(offer.stock, MAX_QTY);
+
+  function onClick() {
+    add({
+      offer_id: offer.id,
+      slug: product.slug,
+      name: product.name,
+      title: product.title,
+      seller_name: offer.seller.name,
+      price_cents: offer.price_cents,
+    });
+    setJustAdded(true);
+    setTimeout(() => setJustAdded(false), 1500); // brief "Added ✓" feedback
+  }
+
+  let label = "Add to cart";
+  if (!offer.in_stock) label = "Sold out";
+  else if (justAdded) label = "Added ✓";
+  else if (full) label = "Max in cart";
+
+  return (
+    <div className="flex flex-col items-stretch gap-1 max-sm:order-last">
+      <button
+        onClick={onClick}
+        disabled={!offer.in_stock || full}
+        className="h-10 rounded-md bg-cta px-4 text-sm font-semibold text-page hover:bg-cta-hover disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {label}
+      </button>
+      {inCart > 0 && (
+        <Link to="/cart" className="text-center text-xs text-accent hover:underline">
+          {inCart} in cart
+        </Link>
+      )}
+    </div>
   );
 }

@@ -154,7 +154,7 @@ export function ProductPage() {
         ) : !offers.data ? (
           <div className="h-40 animate-pulse rounded-lg bg-surface" />
         ) : (
-          <OffersTable offers={offers.data} />
+          <OffersTable offers={offers.data} product={p} />
         )}
       </section>
 
