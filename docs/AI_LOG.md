@@ -308,3 +308,27 @@ It also tested whether day 2 could be built in its workspace. It can't: package 
 **Workspace notes:** the Go module proxy, `golang.org` and `gopkg.in` are blocked in the assistant's workspace, but GitHub isn't. The dependencies were built from the official GitHub mirrors with Go's own `golang.org/x/mod/zip`; the resulting `go.sum` hashes match the ones published in pgx's own `go.sum` exactly, so `go` on the user's PC verifies them normally.
 
 **Next (day 3):** product page with offers, `/search/suggest` and the header dropdown, and search synonyms ("gta" currently finds nothing because no product name contains it).
+
+### Prompts 3–6 (running it on Windows)
+
+> *(screenshots of PowerShell errors, in order)* `docker compose up -d db` → "no configuration file provided"; then "failed to connect to the docker API … docker_engine"; then `go run ./cmd/api` → "'go' is not recognized"; then, after installing Go 1.27.4, "error obtaining buildID for go tool asm: fork/exec C:\Program Files\Go\pkg\tool\windows_amd64\asm.exe: An Application Control policy has blocked this file"; then `npm` → "not recognized".
+
+### Responses 3–6
+
+- Wrong folder: PowerShell opened in `C:\WINDOWS\System32`; `cd $HOME\Downloads\eneba-clone` first.
+- Docker Desktop wasn't running; start it and wait for "Engine running". After that, the database, all 5 migrations and the seed worked.
+- Go wasn't installed; installed with winget, then opened a new terminal.
+- **Windows Smart App Control** blocks Go's unsigned build tools, so `go run` can't work on this PC without turning it off (which on most Windows 11 versions can't be undone without resetting Windows). Instead, `docker-compose.yml` got an `api` service that builds `backend/Dockerfile` (the deploy image), so the API runs in Linux inside Docker. The build worked on the user's PC.
+- Node wasn't installed either, and Vite's own unsigned helpers (esbuild, Rollup) would likely be blocked the same way, so a `web` service now runs the Vite dev server in a `node:22-alpine` container. The `frontend/` folder is mounted in, `node_modules` lives in a Docker volume (Linux packages must not mix with a Windows `node_modules`), and the API is reached as `http://api:8080`. `vite.config.ts` got a `watch.usePolling` option, switched on by `VITE_USE_POLLING`, because file-change events from Windows don't reach the container. Tested in the assistant's workspace: fresh `npm install`, the proxy reaching the API, the store page loading 198 results, and hot reload picking up a saved file.
+
+### Prompts 7–20 (GitHub and deployment)
+
+> *(step-by-step questions while putting the project on GitHub and deploying it: installing Git, a push to the placeholder `YOUR-NAME` URL, removing the nested duplicate `eneba-clone/eneba-clone` folder, setting up Neon, Render and Vercel, plus screenshots of each screen)*
+
+### Responses 7–20
+
+- **GitHub:** installed Git (`winget install Git.Git`, then a new terminal), deleted the stale nested copy and the old `frontend/src/App.tsx`, amended the first commit so the duplicate never reached GitHub, and pushed to `github.com/nanarang1793/eneba-clone`.
+- **Neon:** project in AWS Europe Central 1 (Frankfurt). Used the **direct** connection string (no `-pooler`), because pgx caches prepared statements, which a transaction-mode pooler can break, and dropped `&channel_binding=require`, which golang-migrate's driver doesn't support (`sslmode=require` still encrypts). The first seed attempt failed with `relation "product_keys" does not exist` because migrations hadn't been run yet; after `migrate up` and the seed, `select count(*) from products` returned 200. The database password appeared in a screenshot, so it was reset in Neon before use.
+- **Render:** web service from the GitHub repo, Docker runtime, root directory `backend`, free instance in Frankfurt, `DATABASE_URL` as a secret environment variable, health check `/api/healthz`. The first deploy took 1 min 11 s; logs showed `api listening on :10000` and health checks answering 200. Opening the bare domain shows "Not Found", which is expected because every route lives under `/api`. Live at https://eneba-clone-d0ia.onrender.com/api/products.
+- **Vercel:** the import first picked `backend` as the root directory with the Go preset; changed to `frontend` (Vite preset). The assistant put the Render URL into `frontend/vercel.json` so `/api/*` is rewritten to the API. Deployed in 11 s; the preview showed the store with 198 results and live facet counts, confirming the full chain Vercel → Render → Neon. Live at https://eneba-clone-nine.vercel.app/store.
+- That completes the Day 1 leftovers (code on GitHub, app deployed). From now on every push redeploys both hosts.

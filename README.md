@@ -2,6 +2,11 @@
 
 A digital-key marketplace in Eneba's style. React + TypeScript frontend, Go REST API, PostgreSQL.
 
+**Live demo:** https://eneba-clone-nine.vercel.app/store
+**API:** https://eneba-clone-d0ia.onrender.com/api/products
+
+> The API runs on Render's free tier, which sleeps after ~15 minutes without traffic. The first request after a pause can take up to a minute while it wakes up; after that it's fast.
+
 > Status: **day 2.** Catalog API (`/api/products` with filters, sorting, pagination and facet counts; `/api/filters`) and the Store page (search, filter sidebar, sort, product grid, pagination, filters kept in the URL).
 
 ## Repo layout
@@ -29,7 +34,19 @@ Makefile
 
 Requirements: Docker Desktop, Go 1.24.7+, Node 20+.
 
-**Windows (PowerShell)**, from the repo root, no `make` needed:
+**Everything in Docker (easiest on Windows; no Go or Node install needed)**, from the repo root:
+
+```powershell
+docker compose up -d db
+docker compose run --rm migrate up
+docker compose run --rm seed
+docker compose up -d --build api web    # API on :8080, frontend on http://localhost:5173
+docker compose logs -f api web          # watch the logs (Ctrl+C stops watching, not the apps)
+```
+
+Frontend edits hot-reload as usual. After changing Go code, run `docker compose up -d --build api` again. This route also avoids Windows Smart App Control, which blocks Go's unsigned build tools (`asm.exe`) on some Windows 11 PCs.
+
+**Windows (PowerShell) with Go and Node installed locally**, from the repo root, no `make` needed:
 
 ```powershell
 docker compose up -d db                 # Postgres on localhost:5432
@@ -109,3 +126,14 @@ Game titles are real so search feels realistic. Prices, sellers, keys and descri
 - **`order_items` copies the price and seller** at purchase time.
 - **Search:** `pg_trgm` GIN index on `lower(name)` for typos and partial names, plus a generated `tsvector` column.
 - **Sessions** store only a SHA-256 hash of the cookie token.
+
+## Deployment
+
+| Part | Host | Notes |
+|---|---|---|
+| Database | Neon (Postgres, Frankfurt) | Migrations and seed applied with the same Docker images as locally (`migrate/migrate`, `psql`) |
+| API | Render web service (Docker, Frankfurt, free) | Root directory `backend`, built from `backend/Dockerfile`; `DATABASE_URL` set as a Render environment variable; health check `/api/healthz` |
+| Frontend | Vercel (Vite preset) | Root directory `frontend`; `frontend/vercel.json` rewrites `/api/*` to the Render API, so the browser only ever talks to one origin |
+
+Every push to `main` redeploys both Render and Vercel.
+
