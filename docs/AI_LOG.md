@@ -691,3 +691,21 @@ The assistant built and tested everything in its own workspace against a real Po
 - Yes: all 7 frontend tests passed, and the push (with `.github/workflows/ci.yml` in place) went through. The LF/CRLF messages are only Git noting Windows line endings.
 - The assistant cloned the repository from GitHub and confirmed it matches the tested code. It then ran the CI steps on that clone against a brand-new database: `go vet` clean, 23/23 Go tests passed (none skipped), 7/7 frontend tests, 0 vulnerabilities, and the build succeeds.
 - The zustand warnings are cosmetic, but the test setup was meant to prevent them. The likely cause: the container's Node defines its own `localStorage`, which a plain `globalThis.localStorage = …` doesn't replace. The assistant couldn't reproduce it in its own workspace. `src/test/setup.ts` now uses `Object.defineProperty`, which replaces the property in every case. Tests still pass.
+
+### Prompt 8
+
+> *(screenshot: right after "Continue to checkout", the checkout page showed "Reservation expired — Your 15-minute reservation ran out and the keys went back to other buyers.")* is this supposed to happen
+
+### Response 8
+
+- No, it's a bug. The order was created correctly, but the countdown compared the server's `expires_at` with the **browser's** clock. The vitest output in the previous screenshot gave it away: it printed `Start at 04:27` while the PC's clock said about 18:26 UTC. The Docker Desktop VM's clock was ~14 hours behind, which is a known effect of a laptop sleeping. The API (inside Docker) stamped orders with a time 14 h in the past, so every new order looked already expired.
+- The fix is to stop depending on two clocks agreeing:
+  - The backend now also returns `seconds_left` on each order. Postgres computes it with its own `now()`: `FLOOR(EXTRACT(EPOCH FROM created_at + interval '15 minutes' - now()))`, and it is 0 unless the order is pending. The expiry query uses the same interval constant.
+  - The checkout page builds its deadline as "the moment this browser received the order (`dataUpdatedAt`) + `seconds_left`", so the countdown only ever uses the browser's clock.
+  - Whether a reservation has *really* expired was always decided by the database. The bug was only in the display.
+- Tests:
+  - A new assertion in `TestPayTwice`: a new order has ~900 seconds left and a paid order has 0. All Go tests pass.
+  - `tsc` passes and vitest shows 7/7.
+  - Playwright faked the browser clock 14 h ahead. The old code showed "Reservation expired"; the new code shows `14:59`. With the clock 14 h behind and with no skew, the new code also shows `14:59`.
+  - The Day 5 purchase suite still passes.
+- Fixing the clock itself is still worth doing: run `wsl --shutdown`, then start Docker Desktop again.

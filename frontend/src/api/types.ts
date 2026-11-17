@@ -109,6 +109,7 @@ export type Order = {
   currency: string;
   created_at: string;
   expires_at: string;
+  seconds_left: number; // reservation time left, measured on the server's clock
   paid_at: string | null;
   payment_ref: string | null;
   items: {

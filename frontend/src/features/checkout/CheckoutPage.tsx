@@ -23,7 +23,9 @@ export function CheckoutPage() {
   usePageTitle("Checkout");
 
   const order = useQuery({ queryKey: ["order", id], queryFn: () => getOrder(id) });
-  const secondsLeft = useCountdown(order.data?.expires_at);
+  // dataUpdatedAt = when this browser received the order, on its own clock.
+  const deadline = order.data ? order.dataUpdatedAt + order.data.seconds_left * 1000 : undefined;
+  const secondsLeft = useCountdown(deadline);
 
   const pay = useMutation({
     mutationFn: () => payOrder(id, card),

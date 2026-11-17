@@ -294,9 +294,16 @@ func TestPayTwice(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The countdown comes from the database's clock: ~15 minutes for a new order.
+	if o.SecondsLeft < 890 || o.SecondsLeft > 900 {
+		t.Errorf("new order: want ~900 seconds left, got %d", o.SecondsLeft)
+	}
 	first, err := f.store.Pay(ctx, f.users[0], o.ID, TestCardSuccess)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if first.SecondsLeft != 0 {
+		t.Errorf("paid order: want 0 seconds left, got %d", first.SecondsLeft)
 	}
 	second, err := f.store.Pay(ctx, f.users[0], o.ID, TestCardSuccess)
 	if err != nil || second.PaymentRef == nil || *second.PaymentRef != *first.PaymentRef {

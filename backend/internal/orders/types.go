@@ -44,15 +44,20 @@ type Quote struct {
 
 // Order is the body of GET /api/orders/{id} (and of create/pay responses).
 type Order struct {
-	ID         string      `json:"id"`
-	Status     string      `json:"status"` // pending | paid | failed | expired
-	TotalCents int         `json:"total_cents"`
-	Currency   string      `json:"currency"`
-	CreatedAt  time.Time   `json:"created_at"`
-	ExpiresAt  time.Time   `json:"expires_at"` // when an unpaid order's reservation runs out
-	PaidAt     *time.Time  `json:"paid_at"`
-	PaymentRef *string     `json:"payment_ref"`
-	Items      []OrderItem `json:"items"`
+	ID         string    `json:"id"`
+	Status     string    `json:"status"` // pending | paid | failed | expired
+	TotalCents int       `json:"total_cents"`
+	Currency   string    `json:"currency"`
+	CreatedAt  time.Time `json:"created_at"`
+	ExpiresAt  time.Time `json:"expires_at"` // when an unpaid order's reservation runs out
+	// SecondsLeft is the time left on the reservation, measured on the
+	// database's clock. The checkout countdown uses this instead of comparing
+	// expires_at with the browser's clock, because the two clocks can
+	// disagree (e.g. a Docker VM whose clock drifted after sleep).
+	SecondsLeft int         `json:"seconds_left"`
+	PaidAt      *time.Time  `json:"paid_at"`
+	PaymentRef  *string     `json:"payment_ref"`
+	Items       []OrderItem `json:"items"`
 }
 
 type OrderItem struct {

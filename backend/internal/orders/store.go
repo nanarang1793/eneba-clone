@@ -32,6 +32,10 @@ const (
 	maxQty             = 10 // keys of one offer per order
 )
 
+// reservationInterval is reservationMinutes as SQL, for queries that do the
+// time arithmetic on the database's clock.
+var reservationInterval = fmt.Sprintf("interval '%d minutes'", reservationMinutes)
+
 var (
 	ErrNotFound           = errors.New("order not found")
 	ErrNotPending         = errors.New("order is not awaiting payment")
@@ -463,10 +467,9 @@ func closePendingOrders(ctx context.Context, tx pgx.Tx, userID string) error {
 // no job to forget to run, and the keys themselves already count as free once
 // reserved_until has passed (catalog.UsableKey).
 func (s *Store) expireOldOrders(ctx context.Context, userID string) error {
-	_, err := s.db.Exec(ctx, fmt.Sprintf(`
+	_, err := s.db.Exec(ctx, `
         UPDATE orders SET status = 'expired'
-        WHERE user_id = $1 AND status = 'pending' AND created_at < now() - interval '%d minutes'`,
-		reservationMinutes), userID)
+        WHERE user_id = $1 AND status = 'pending' AND created_at < now() - `+reservationInterval, userID)
 	if err != nil {
 		return fmt.Errorf("expire orders: %w", err)
 	}
@@ -510,7 +513,10 @@ func (s *Store) List(ctx context.Context, userID string) ([]Order, error) {
 // load reads orders matching the given WHERE/ORDER clause, then their items.
 func (s *Store) load(ctx context.Context, where string, args ...any) ([]Order, error) {
 	rows, err := s.db.Query(ctx, `
-        SELECT o.id, o.status::text, o.total_cents, o.currency, o.created_at, o.paid_at, o.payment_ref
+        SELECT o.id, o.status::text, o.total_cents, o.currency, o.created_at, o.paid_at, o.payment_ref,
+               CASE WHEN o.status = 'pending'
+                    THEN GREATEST(0, FLOOR(EXTRACT(EPOCH FROM o.created_at + `+reservationInterval+` - now())))::int
+                    ELSE 0 END
         FROM orders o `+where, args...)
 	if err != nil {
 		return nil, fmt.Errorf("load orders: %w", err)
@@ -520,7 +526,7 @@ func (s *Store) load(ctx context.Context, where string, args ...any) ([]Order, e
 	ids := []string{}
 	for rows.Next() {
 		var o Order
-		if err := rows.Scan(&o.ID, &o.Status, &o.TotalCents, &o.Currency, &o.CreatedAt, &o.PaidAt, &o.PaymentRef); err != nil {
+		if err := rows.Scan(&o.ID, &o.Status, &o.TotalCents, &o.Currency, &o.CreatedAt, &o.PaidAt, &o.PaymentRef, &o.SecondsLeft); err != nil {
 			rows.Close()
 			return nil, err
 		}
