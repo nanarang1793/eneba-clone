@@ -6,6 +6,7 @@
 #   docker compose up -d --build api # build + run the Go API in Docker on :8080
 #                                    # (alternative to `go run ./cmd/api`; no local Go needed)
 #   docker compose up -d web         # Vite dev server on :5173 (no local Node needed)
+#   docker compose run --rm test     # run all Go tests against this database
 #
 # Or just: make db-reset
 
@@ -82,6 +83,25 @@ services:
     ports:
       - "5173:5173"
 
+  # Runs every Go test, including the ones that need the database (they read
+  # TEST_DATABASE_URL). Needs the db migrated and seeded first. The tests
+  # create their own sellers/offers/users and delete them afterwards.
+  test:
+    image: golang:1.24-alpine
+    profiles: ["tools"]
+    working_dir: /src
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      TEST_DATABASE_URL: postgres://eneba:eneba@db:5432/eneba?sslmode=disable
+      CGO_ENABLED: "0"
+    volumes:
+      - ./backend:/src
+      - go_mod_cache:/go/pkg/mod
+    command: ["go", "test", "./...", "-count=1", "-v"]
+
 volumes:
   pgdata:
   web_node_modules:
+  go_mod_cache:

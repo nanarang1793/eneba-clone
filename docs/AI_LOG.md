@@ -605,3 +605,79 @@ The assistant explained that the Day 4 push had already gone through ("nothing t
 - The earlier Day 2 test assumed `/` redirects to `/store`; it now opens `/store` directly.
 
 **Next (day 7):** Go tests for the risky parts (key reservation under concurrency, search ranking, auth), the README's scope and trade-offs section, a final deploy, and finishing this log.
+
+## Session 8 — 2026-11-16 (applying migration 6, Day 7)
+
+### Prompts 1–5
+
+> where do i get the neon url again? / *(screenshot: migrate failed with `lookup ...postgresql: no such host`)* / *(screenshot: `password authentication failed for user 'neondb_owner'`)* / *(screenshot of the Render service page)* / next steps?
+
+### Responses 1–5
+
+- The Neon address can be copied from Neon (**Connect**, pooling off, remove `&channel_binding=require`) or from Render (**Environment → DATABASE_URL**), which is known to be current because the live site uses it.
+- First error: the address had been pasted *into* the example text, so it read `postgresql://...postgresql://…?sslmode=require...?sslmode=require`. Fix: replace everything between the quotes.
+- Second error: the address used the **old** password from before the reset. Fix: copy it from Render's environment variables (under **MANAGE → Environment**, not the "← Environment" link at the top).
+- The assistant pointed out each time that the password was visible in the screenshot, and that if it's reset again, Render's `DATABASE_URL` must be updated too.
+- Next steps: push Day 6, check that the live homepage's second banner says "Bestselling games" (proof the migration reached Neon), then Day 7.
+
+### Prompt 6
+
+> do the final part
+
+### Response 6
+
+*(Work done: built and tested in the assistant's workspace, then wrote the files into `Downloads\eneba-clone`.)*
+
+**Go tests** (23 in total)
+- `internal/testdb`: a helper that connects to `TEST_DATABASE_URL`, or **skips** the test when it's unset, so `go test ./...` still runs the plain unit tests anywhere.
+- `orders/orders_db_test.go`: each test builds its own seller, offer with N keys and users, and deletes them afterwards. The product's `sales_count` is restored too, so a test run leaves the database unchanged (checked with a checksum of all products before and after).
+  - `TestNoKeySoldTwice`: 40 goroutines released at once by a closed channel, 3 keys. Exactly 3 orders and 37 `OutOfStockError`, each reserved key on its own order line; then the 3 winners pay concurrently and get 3 different keys.
+  - `TestSameIdempotencyKeyMakesOneOrder`, `TestShortOrderRollsBack`, `TestExpiredReservation`, `TestDeclineReleasesKeys`, `TestPayTwice`, `TestOrdersArePrivate`, `TestNewCheckoutReplacesUnpaidOrder`.
+- `catalog/catalog_db_test.go`:
+  - Typos, synonyms, letter case and prefixes find the right game first, and `%` is matched literally.
+  - Facet sums equal the total, and a facet ignores its own filter.
+  - The price filter stays within range, and walking every page sorted by price shows each product exactly once, in order.
+- `auth/auth_db_test.go`: the whole sign-in flow through real HTTP requests:
+  - Register sets an HttpOnly, SameSite=Lax cookie, the database holds a bcrypt hash and a SHA-256 of the session token, and a duplicate email returns 409.
+  - `RequireUser` gives 401 without a cookie and 200 with one. Logout really ends the session.
+  - A wrong password and an unknown email give byte-identical answers, and a form-encoded post gets 400.
+- Unit tests: query parameter validation, synonyms, discount, cart merging and limits, test cards, UUID checks, email normalisation, token hashing.
+
+**Do the tests catch real bugs?** Code was broken on purpose to check:
+- Breaking duplicate-merging in the cart failed two tests, and breaking the "gta" synonym failed one.
+- **Removing `FOR UPDATE SKIP LOCKED` made `TestNoKeySoldTwice` fail 3 out of 3 times: 4–6 buyers "got" one of 3 keys, so the shop oversold.** With the lock restored, it passed 10 out of 10 repeated runs. This is the clearest evidence that the row locking is what makes checkout correct.
+
+**Frontend tests** (Vitest, 7 tests): `safeNext` never redirects off-site (`//evil.com`, `/\evil.com`, `https://…`, `javascript:` all go to `/account`); `pageList`; and the cart store's merging, 1–10 limits and removal. A small setup file gives tests an in-memory `localStorage`. Vitest 3 pulled in packages with known security advisories (`tinypool`, `@vitest/mocker`; 2 critical, 1 moderate, dev-only), so it was upgraded to **Vitest 5.1**, which supports our Vite 6.4; `npm audit` now reports 0.
+
+**Running the tests**
+- `docker compose run --rm test` runs every Go test in a `golang:1.24-alpine` container against the local database. Needed because Windows Smart App Control blocks Go's tools on the user's PC.
+- `docker compose run --rm web sh -c "npm install && npm test"` runs the frontend tests.
+- **GitHub Actions** (`.github/workflows/ci.yml`):
+  - **Backend job:** a Postgres 16 service, migrations and the seed applied with `psql`, then `go vet` and `go test`.
+  - **Frontend job:** `npm ci`, `npm test`, then `npm run build`, which also type-checks.
+  - The action versions (`checkout`, `setup-go`, `setup-node` v7) and their input names were checked against the actions' own repositories instead of guessed.
+  - The workflow's steps were then run by hand on a brand-new empty database and a clean copy of the frontend: all 23 Go tests ran (none skipped), all 7 frontend tests passed, and the build succeeded.
+
+**README**
+- A CI badge, a "What's in it" table, and **Scope & trade-offs**: what was built in depth and why, what was cut on purpose (seller side, admin panel, real payments, emails, refunds, account extras, cover art, separate services), and known limits.
+- A **Testing** section explaining what each test proves and how to run it.
+- The live link now points at the homepage.
+
+**Regressions:** the Day 2 store suite and the Day 6 homepage suite were re-run against the final code and pass. `tsc`, `vite build` and `go vet` are clean.
+
+---
+
+## Project summary
+
+| Day | Delivered |
+|---|---|
+| 1 | Monorepo, Docker Compose Postgres, 5 migrations, deterministic seed (200 products, 8 sellers, 776 offers, ~4,500 keys) |
+| 2 | Catalog API (filters, sort, pagination, facets, trigram search), shared error format, Store page with URL-driven filters |
+| — | Windows: everything runs in Docker (Smart App Control blocks Go's tools); GitHub repo; deployed on Neon + Render + Vercel |
+| 3 | Product page with all seller offers, header search with debounced suggestions, search synonyms |
+| 4 | Accounts: bcrypt, hashed server-side sessions, HttpOnly cookie, protected routes |
+| 5 | Cart, server-priced checkout, key reservation with `FOR UPDATE SKIP LOCKED`, idempotent orders, simulated payment, order history with keys |
+| 6 | Data-driven homepage (layout + independent block providers), type filter, mobile header, error boundary, scroll restore |
+| 7 | 23 Go tests (incl. a 40-buyer race), 7 frontend tests, CI on every push, scope & trade-offs in the README |
+
+The assistant built and tested everything in its own workspace against a real Postgres before writing files to the user's PC. Bugs that its testing found were fixed and are recorded under each session. The user ran the Docker, Git, Neon, Render and Vercel steps on their own machine and accounts.

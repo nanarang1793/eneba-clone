@@ -1,13 +1,52 @@
 # Eneba clone: Intern Assignment 2027
 
-A digital-key marketplace in Eneba's style. React + TypeScript frontend, Go REST API, PostgreSQL.
+[![CI](https://github.com/nanarang1793/eneba-clone/actions/workflows/ci.yml/badge.svg)](https://github.com/nanarang1793/eneba-clone/actions/workflows/ci.yml)
 
-**Live demo:** https://eneba-clone-nine.vercel.app/store
+A digital-key marketplace in Eneba's style: browse and search games, compare sellers' offers, sign in, and buy keys through a checkout that can never sell the same key twice. React + TypeScript frontend, Go REST API, PostgreSQL.
+
+**Live demo:** https://eneba-clone-nine.vercel.app
 **API:** https://eneba-clone-d0ia.onrender.com/api/products
+**AI conversation log:** [docs/AI_LOG.md](docs/AI_LOG.md)
 
 > The API runs on Render's free tier, which sleeps after ~15 minutes without traffic. The first request after a pause can take up to a minute while it wakes up; after that it's fast.
 
-> Status: **day 6.** Data-driven homepage (banner carousel + product rows, each from its own provider), store with filters/facets, product page with seller offers, search with suggestions, accounts, and a full purchase with real key reservation. Demo account: `demo@eneba.test` / `demo1234`. Test card: `4242 4242 4242 4242` (or `4000 0000 0000 0002` for a decline).
+**Try it:** sign in with `demo@eneba.test` / `demo1234` (or register), add something to the cart, check out and pay with test card `4242 4242 4242 4242` (`4000 0000 0000 0002` shows a decline). The keys appear on the order page.
+
+## What's in it
+
+| Area | What it does |
+|---|---|
+| **Homepage** | Layout comes from the database: a banner carousel plus product rows (bestsellers, deals, new releases, gift cards, subscriptions). Each block has its own backend provider and loads independently |
+| **Store** | Filters (type, platform, region, price), 5 sort orders, pagination and live facet counts, all kept in the URL |
+| **Search** | Typo-tolerant (`eldn ring`) via Postgres trigrams, short names (`gta`, `cod`, `bg3`), suggestions while typing with keyboard navigation |
+| **Product page** | Every seller's offer, cheapest in-stock first with the best price highlighted, plus other platforms and regions of the same game |
+| **Accounts** | Register, sign in and out with bcrypt passwords and a server-side session in an HttpOnly cookie; protected pages |
+| **Checkout** | Cart in the browser, prices always from the server, keys **reserved in a transaction with `FOR UPDATE SKIP LOCKED`** for 15 minutes, idempotent order creation, simulated payment, keys shown once paid |
+| **Tests** | 23 Go tests (including 40 simultaneous buyers on 3 keys) against a real Postgres, 7 frontend tests, all run in GitHub Actions on every push |
+
+## Scope & trade-offs
+
+The brief says a few features done in depth beat many done minimally, so the effort went into the parts with real engineering problems: the **search and filter engine**, the **checkout that hands out real keys safely**, and a **data-driven homepage**.
+
+**Built in depth**
+- **Key reservation under concurrency** is the core of the project. See [Checkout and key reservation](#checkout-and-key-reservation) and the test that proves it (`TestNoKeySoldTwice`). With the row locking removed, the same test oversells (4–6 buyers "get" one of 3 keys), so the locking is what makes it correct.
+- **One query engine** powers the store, search and homepage rows (a "listing" CTE of what can be bought right now, the cheapest in-stock price, facets that ignore their own filter).
+- **Money is integer cents** and the server re-prices everything, so a tampered cart can't change what you pay.
+
+**Cut on purpose** (each would be next on a real team)
+- **Seller side:** seller accounts, dashboards and creating listings. Sellers, offers and keys are seeded; the brief describes the buyer's side.
+- **Admin panel:** homepage blocks and banners are edited in the database (a migration or SQL), with no deploy needed.
+- **Real payments:** checkout talks to a `PaymentProvider` interface; Stripe test mode would be a second implementation of it.
+- **Emailing keys, refunds, reviews, wishlist, multiple currencies (EUR only), translations.**
+- **Account extras:** password reset, email verification, OAuth, rate limiting of login attempts.
+- **Cover art:** Eneba's images aren't copied; covers are generated gradients, and the Eneba look comes from colours, type and layout.
+- **Separate microservices for homepage blocks:** see [Homepage blocks](#homepage-blocks) for why providers are modules in one service.
+
+**Known limits**
+- Free hosting: the API sleeps when idle (first request can take up to a minute), and Neon's free tier is small.
+- Search matches product names (plus synonyms), not descriptions or genres, and doesn't rank by popularity beyond ties.
+- The cart lives in the browser, so it doesn't follow you to another device (the server stays in charge of prices and stock).
+- Unpaid orders expire when they're next read, not by a timer. Correct (an expired reservation's keys are already for sale), but an expired order stays `pending` in the table until someone reads it.
 
 ## Repo layout
 
@@ -17,6 +56,7 @@ backend/
   cmd/seedgen/    deterministic seed generator → seed/seed.sql
   internal/httpx/ JSON + shared error format + panic recoverer + JSON body decoding
   internal/auth/  store.go (users + sessions SQL) · handler.go (register/login/logout/me, cookie) · middleware.go (RequireUser)
+  internal/testdb/ helper for database tests (TEST_DATABASE_URL, skip when unset)
   internal/home/   handler.go (layout + block endpoints) · providers.go (one Provider per block type)
   internal/orders/ store.go (quote, order + key reservation, payment, history) · payments.go (PaymentProvider + simulated)
                   handler.go (HTTP) · types.go (JSON)
@@ -39,6 +79,7 @@ frontend/src/
   features/orders/  OrderPage (keys + copy button), StatusBadge
   styles/         Tailwind + Eneba design tokens
 docs/AI_LOG.md    full AI conversation log (assignment deliverable)
+.github/workflows/ci.yml  tests + build on every push
 docker-compose.yml
 Makefile
 ```
@@ -81,6 +122,29 @@ cd frontend && npm install && npm run dev   # http://localhost:5173
 Other targets: `make migrate-up`, `make migrate-down`, `make seed`, `make seed-gen`, `make psql`.
 
 The API reads `DATABASE_URL` and `PORT` from the environment and defaults to the local Docker database, so `go run ./cmd/api` works with no setup.
+
+## Testing
+
+```powershell
+docker compose run --rm test                                   # all Go tests, against your local Docker database
+docker compose run --rm web sh -c "npm install && npm test"    # frontend tests
+```
+
+The database tests need the db migrated and seeded (see above). They create their own seller, offer, keys and users, and delete them afterwards, so your data is left exactly as it was. Without a database (`TEST_DATABASE_URL` unset) `go test ./...` runs only the plain unit tests and skips the rest.
+
+| Test | What it proves |
+|---|---|
+| `orders.TestNoKeySoldTwice` | 40 buyers check out the same offer at the same instant with 3 keys left: exactly 3 orders, 37 `out_of_stock`, and the 3 winners paying at once get 3 different keys |
+| `orders.TestSameIdempotencyKeyMakesOneOrder` | 20 identical checkout requests at once (a double click) create one order |
+| `orders.TestShortOrderRollsBack` | Asking for more keys than exist saves nothing and reserves nothing |
+| `orders.TestExpiredReservation` | After 15 minutes another buyer can take the keys; the late payment is refused |
+| `orders.TestDeclineReleasesKeys` / `TestPayTwice` / `TestOrdersArePrivate` / `TestNewCheckoutReplacesUnpaidOrder` | Declines release keys at once; paying twice is harmless; others' orders are invisible; a new checkout frees your previous unpaid one |
+| `catalog.TestSearchFindsTyposAndShortNames` | `eldn ring`, `witchr`, `gta`, `rdr2`… find the right game first; `%` is matched literally |
+| `catalog.TestFiltersAndFacets` / `TestPaginationIsStableAndComplete` | Facet counts add up and ignore their own filter; walking all pages shows every product once, in order |
+| `auth.TestSignInFlow` | Register, `/me`, HttpOnly cookie, bcrypt hash and SHA-256 session in the DB, 409 on duplicates, logout really ends the session, wrong password and unknown email look identical, form posts refused |
+| Unit tests | Query parameter validation, synonyms, discounts, cart limits, test cards, email checks; frontend: `safeNext` redirects, pagination, cart store |
+
+**CI:** `.github/workflows/ci.yml` runs all of it on every push: Postgres 16 as a service, migrations and seed applied with `psql`, `go vet`, `go test`, then `npm ci`, `npm test` and `npm run build`.
 
 ## API
 
@@ -196,7 +260,7 @@ The part of the app that has to be right: **one key must never be sold to two bu
 4. **Reservations expire after 15 minutes without a background job:** a key counts as free once `reserved_until` has passed, and unpaid orders are marked `expired` when they're read. A user also has at most one unpaid order; starting a new checkout releases the old one's keys.
 5. **Pay** locks the order row (so two Pay clicks can't both charge), checks the order still holds all its keys, then charges through a `PaymentProvider` interface. The simulated provider approves `4242 4242 4242 4242` and declines `4000 0000 0000 0002`. On success the keys become `sold`; on a decline they're released immediately.
 
-**Tested** with 40 buyers ordering the same offer at the same instant, on offers with 3 keys left, repeated on 5 different offers. Every time exactly 3 got an order, 37 got `out_of_stock`, and the 3 keys handed out were all different. 40 identical requests from one user with the same Idempotency-Key created exactly one order. Afterwards the whole database had no key linked to two order lines, and no sold key without a paid order.
+**Tested** by `TestNoKeySoldTwice` (see [Testing](#testing)): 40 buyers order the same offer at the same instant with 3 keys left; exactly 3 get an order, 37 get `out_of_stock`, and the 3 winners paying at once receive 3 different keys. With `FOR UPDATE SKIP LOCKED` removed, the same test oversells (4–6 buyers "get" one of 3 keys) and fails, which shows the locking is what makes it correct. It was also checked by hand with 40 real HTTP clients repeated on 5 offers, and 40 identical requests with the same Idempotency-Key created one order.
 
 **Not done (would be next):** real payments (Stripe test mode would be a new `PaymentProvider`), emailing keys, refunds.
 
